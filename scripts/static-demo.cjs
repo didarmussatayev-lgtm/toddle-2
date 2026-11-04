@@ -149,19 +149,19 @@ async function main() {
   // Стартовая страница — выбор роли
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const index = `<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Журнал IB — демо</title>${css}</head>
-<body><main class="mx-auto max-w-5xl px-4 py-10">
+<body><main class="mx-auto max-w-7xl px-4 py-6">
 <div class="mb-2 text-sm font-medium text-brand-600">Лицей «Демо» · MYP + DP</div>
 <h1 class="text-3xl font-semibold tracking-tight">Журнал IB · демо-версия</h1>
 <p class="mt-2 max-w-3xl text-slate-600">Прототип электронного журнала: расписание, посещаемость, задания, оценивание по критериям IB, итоги за периоды в шкале 1–7 и 5-балльной, кабинеты ученика и родителя. Выберите роль, чтобы увидеть систему глазами этого пользователя.</p>
 <div class="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">Это статический снимок на GitHub Pages: все экраны открываются, но сохранение (оценки, посещаемость, блокировка периодов) отключено. Все люди и данные вымышленные. Полная версия запускается локально — см. <a class="underline" href="https://github.com/festeast/toddle-#readme">README</a>.</div>
-<div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-${cards.map((c) => `<a href="${c.href}" class="card block p-5 hover:border-brand-500 hover:bg-brand-50">
+<div class="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+${cards.map((c) => `<a href="${c.href}" class="card block p-4 hover:border-brand-500">
 <div class="text-xs font-semibold uppercase tracking-wide text-brand-600">${esc(c.title)}</div>
 <div class="mt-1 text-lg font-semibold">${esc(c.who)}</div>
 ${c.sub ? `<div class="text-xs text-slate-500">${esc(c.sub)}</div>` : ""}
 <div class="mt-2 text-sm text-slate-600">${esc(c.desc)}</div></a>`).join("\n")}
 </div>
-<p class="mt-10 text-xs text-slate-400">Снимок собран ${new Date().toISOString().slice(0, 10)} · код: <a class="underline" href="https://github.com/festeast/toddle-">festeast/toddle-</a></p>
+<p class="mt-6 text-xs text-slate-500">Снимок собран ${new Date().toISOString().slice(0, 10)} · код: <a class="underline" href="https://github.com/festeast/toddle-">festeast/toddle-</a></p>
 </main></body></html>`;
   fs.writeFileSync(path.join(OUT, "index.html"), index);
   fs.writeFileSync(path.join(OUT, "404.html"), index.replace("<h1", '<p class="mb-4 text-red-700">Страница не найдена в снимке.</p><h1'));
