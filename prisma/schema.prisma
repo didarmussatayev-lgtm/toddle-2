@@ -1,0 +1,2078 @@
+// =============================================================================
+//  ЭЛЕКТРОННЫЙ ЖУРНАЛ ДЛЯ IB-ШКОЛЫ (MYP + DP) — Prisma schema v0.1
+//  Источник требований: PROJECT_PLAN.md (разделы 2–11, 8.2, 10.x, 15)
+//
+//  Теги релизов в комментариях:  [R1] ядро (мес. 1–3) · [R2] (мес. 3–5) · [R3] (мес. 5–6)
+//  Все таблицы R2/R3 включены сейчас, чтобы не ломать миграциями связи позже,
+//  но в R1 реализуются только помеченные [R1].
+//
+//  Соглашения:
+//   • id — UUID. Тенант = School (multi-school-ready); schoolId стоит на корневых
+//     агрегатах, дочерние таблицы наследуют школу через родителя.
+//   • Переводимый текст хранится в Json вида {"ru":"…","kk":"…","en":"…"} ("I18n").
+//   • Мягкое удаление: deletedAt/deletedById (+ «Recycle bin» в UI).
+//   • Настройки оценивания — ДАННЫЕ (таблицы), а не код (см. раздел 8.2 плана).
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================ ENUMS ==========================================
+
+enum ProgrammeCode {
+  MYP
+  DP
+}
+
+enum UserStatus {
+  INVITED
+  ACTIVE
+  DISABLED
+}
+
+enum Locale {
+  ru
+  kk
+  en
+}
+
+enum RoleKey {
+  SUPER_ADMIN
+  ACCOUNT_SUPERVISOR
+  IT_ADMIN
+  SCHOOL_ADMIN
+  PRINCIPAL
+  COORDINATOR            // координатор программы (MYP / DP) — programmeId обязателен
+  DEPUTY_HEAD            // завуч (параллель/программа в scope)
+  TEACHER
+  COMMUNICATIONS_MANAGER
+  ATTENDANCE_MANAGER
+  PROJECT_COORDINATOR    // PP / CP / SAA / CAS / EE / TOK — projectTypeId в scope
+  PROJECT_SUPERVISOR
+  HOMEROOM_ADVISOR       // куратор
+  CAS_SUPERVISOR
+  STUDENT
+  GUARDIAN
+}
+
+enum PeriodKind {
+  REPORTING     // Term 1..4
+  CUMULATIVE    // Semester 1/2, Final (агрегирует reporting-периоды)
+}
+
+enum CourseLevel {
+  NONE
+  SL
+  HL
+}
+
+enum GroupKind {
+  YEAR_GROUP     // параллель (Batch)
+  HOMEROOM       // 7A
+  SUBGROUP       // "7A 1 group Design"
+  CUSTOM
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  WITHDRAWN
+  COMPLETED
+}
+
+enum DatasetKind {
+  ATL
+  KEY_CONCEPT
+  RELATED_CONCEPT
+  GLOBAL_CONTEXT
+  LEARNER_PROFILE
+  STATEMENT_OF_INQUIRY_TEMPLATE
+  DP_AIM
+  DP_ASSESSMENT_OBJECTIVE
+  DP_SYLLABUS
+  STANDARD
+  CUSTOM
+}
+
+enum UnitItemType {
+  LEARNING_EXPERIENCE
+  FORMATIVE_ASSESSMENT
+  SUMMATIVE_ASSESSMENT
+  WORKSHEET
+  QUICK_TASK
+  NOTE
+  LINK
+  FOLDER
+}
+
+enum AssignmentType {
+  FORMATIVE
+  SUMMATIVE
+  LEARNING_EXPERIENCE
+  WORKSHEET
+  QUICK_TASK
+  VIDEO_MEETING
+}
+
+enum PublishStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+  ARCHIVED
+}
+
+enum SubmissionStatus {
+  NOT_SUBMITTED
+  SUBMITTED
+  LATE
+  RETURNED
+  MISSED_VALID     // пропуск по уважительной причине → пересдача в 7 дней
+  MISSED_INVALID   // неуважительная → 0
+}
+
+enum EvaluationStatus {
+  NOT_EVALUATED
+  DRAFT
+  EVALUATED
+  SHARED           // опубликована ученику/семье
+}
+
+enum GradeScaleType {
+  REGULAR          // числовая/буквенная со значениями
+  SPECIAL_CODES    // NQT, EX и т.п.
+  DEPENDENT        // производная (5-балльная из IB 1–7)
+}
+
+enum CriterionAggregation {
+  MEAN_ROUND_HALF_UP   // дефолт школы (политика 2026-27)
+  MODE
+  LATEST
+  HIGHEST
+  BEST_FIT
+}
+
+enum AttendanceKind {
+  PRESENT
+  ABSENT
+  LATE
+  EXCUSED
+  OLYMPIAD
+  OTHER
+}
+
+enum ExcusalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ProjectKind {
+  PERSONAL_PROJECT       // MYP PP
+  COMMUNITY_PROJECT      // MYP CP
+  SERVICE_AS_ACTION      // MYP SAA
+  CAS                    // DP
+  EXTENDED_ESSAY         // DP EE
+  TOK_ESSAY
+  TOK_EXHIBITION
+  REFLECTIVE_PROJECT
+  COLLABORATIVE_SCIENCES
+  COMMUNITY_ENGAGEMENT
+  SERVICE_LEARNING
+}
+
+enum ProjectStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  SUBMITTED
+  COMPLETED
+  NON_SUBMISSION
+}
+
+enum CasStrand {
+  CREATIVITY
+  ACTIVITY
+  SERVICE
+}
+
+enum AssessmentComponentKind {
+  INTERNAL   // IA
+  EXTERNAL   // EA
+}
+
+enum ConversationKind {
+  DIRECT
+  GROUP
+}
+
+enum AnnouncementStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+  TRASHED
+}
+
+enum RecipientScope {
+  ALL_MEMBERS
+  STAFF
+  STUDENTS
+  FAMILY
+}
+
+enum AudienceGroupType {
+  SCHOOL
+  GRADE
+  CLASS
+  CUSTOM
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  PUSH
+}
+
+enum PortfolioPostStatus {
+  DRAFT
+  SCHEDULED
+  IN_APPROVAL
+  PUBLISHED
+  REJECTED
+}
+
+enum ReportKind {
+  STATUS_REPORT        // промежуточный (середина семестра)
+  SEMESTER_REPORT
+  STUDENT_OVERVIEW     // сводный: успеваемость по всем предметам
+  TRANSCRIPT
+  CERTIFICATE
+  CUSTOM
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  PARTIAL
+}
+
+enum ExternalSource {
+  TODDLE
+  EDUPAGE
+  ASC_TIMETABLES
+  GOOGLE
+}
+
+// ============================ 1. ОРГАНИЗАЦИЯ И ДОСТУП ========================
+
+/// [R1] Тенант. Сейчас одна школа.
+model School {
+  id            String   @id @default(uuid()) @db.Uuid
+  name          Json     // I18n
+  code          String?  @unique
+  timezone      String   @default("Asia/Almaty")
+  defaultLocale Locale   @default(ru)
+  logoFileId    String?  @db.Uuid
+  settings      Json     @default("{}") // общие настройки (видимость оценок, модули и т.п. — см. SchoolModuleToggle)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  programmes       Programme[]
+  users            User[]
+  academicYears    AcademicYear[]
+  subjectGroups    SubjectGroup[]
+  departments      Department[]
+  files            FileAsset[]
+  modules          SchoolModuleToggle[]
+}
+
+/// [R1] MYP / DP — «программа» внутри школы.
+model Programme {
+  id        String        @id @default(uuid()) @db.Uuid
+  schoolId  String        @db.Uuid
+  code      ProgrammeCode
+  name      Json
+  school    School        @relation(fields: [schoolId], references: [id])
+
+  yearGroups       YearGroup[]
+  subjects         Subject[]
+  roleAssignments  RoleAssignment[]
+  gradingPolicies  GradingPolicy[]
+  plannerTemplates PlannerTemplate[]
+  courses          Course[]
+  gradeScales      GradeScale[]
+  periods          GradingPeriod[]
+
+  @@unique([schoolId, code])
+}
+
+/// [R1] Включение модулей (Toggle modules): enabled / видим ученикам / видим семье.
+model SchoolModuleToggle {
+  id               String  @id @default(uuid()) @db.Uuid
+  schoolId         String  @db.Uuid
+  programmeId      String? @db.Uuid
+  moduleKey        String  // 'messaging','portfolio','personal_project','cas','insights',...
+  enabled          Boolean @default(true)
+  visibleToStudents Boolean @default(true)
+  visibleToFamily  Boolean @default(true)
+  config           Json    @default("{}")
+  school           School  @relation(fields: [schoolId], references: [id])
+
+  @@unique([schoolId, programmeId, moduleKey])
+}
+
+/// [R1] Пользователь (персона входа). Google Workspace — основной способ входа.
+model User {
+  id           String     @id @default(uuid()) @db.Uuid
+  schoolId     String     @db.Uuid
+  email        String
+  firstName    String
+  lastName     String
+  middleName   String?
+  preferredName String?
+  prefix       String?
+  avatarFileId String?    @db.Uuid
+  locale       Locale     @default(ru)
+  status       UserStatus @default(INVITED)
+  /// Код входа ученика/код приглашения семьи (хранить хэш; показывать однократно/по запросу)
+  signInCodeHash String?
+  uid          String?    // читаемый идентификатор вида TD-XXXXXXXX → у нас SCH-XXXXXXXX
+  lastActiveAt DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  deletedAt    DateTime?
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  staffProfile   StaffProfile?
+  studentProfile StudentProfile?
+  guardianProfile GuardianProfile?
+  roles          RoleAssignment[]
+  authAccounts   AuthAccount[]
+  sessions       AuthSession[]
+  notifications  Notification[]       @relation("NotificationRecipient")
+  notificationPrefs NotificationPreference[]
+  messagesSent   Message[]
+  participations ConversationParticipant[]
+
+  @@unique([schoolId, email])
+  @@unique([schoolId, uid])
+  @@index([schoolId, status])
+}
+
+/// [R1] Auth.js: привязка внешнего провайдера (Google).
+model AuthAccount {
+  id                String  @id @default(uuid()) @db.Uuid
+  userId            String  @db.Uuid
+  provider          String
+  providerAccountId String
+  refreshToken      String?
+  accessToken       String?
+  expiresAt         Int?
+  scope             String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model AuthSession {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @db.Uuid
+  sessionToken String   @unique
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// [R1] Роль пользователя с областью действия (Programme-scoped RBAC).
+model RoleAssignment {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @db.Uuid
+  role         RoleKey
+  programmeId  String?  @db.Uuid   // MYP/DP координаторы — разные люди
+  yearGroupId  String?  @db.Uuid   // завуч параллели
+  departmentId String?  @db.Uuid
+  projectKind  ProjectKind?        // координатор конкретного проекта
+  academicYearId String? @db.Uuid
+  createdAt    DateTime @default(now())
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  programme Programme? @relation(fields: [programmeId], references: [id])
+
+  @@index([userId])
+  @@index([role, programmeId])
+}
+
+/// [R1] Профиль сотрудника.
+model StaffProfile {
+  id           String  @id @default(uuid()) @db.Uuid
+  userId       String  @unique @db.Uuid
+  staffUid     String?
+  displayTitle String? // «Kazakh Language teacher»
+  departmentId String? @db.Uuid
+  phone        String?
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department   Department? @relation(fields: [departmentId], references: [id])
+
+  courseStaff   CourseStaff[]
+  advisorships  StudentAdvisor[]
+}
+
+/// [R1] Профиль ученика.
+model StudentProfile {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @unique @db.Uuid
+  studentUid    String?   // национальный/школьный ID
+  birthDate     DateTime? @db.Date
+  gender        String?
+  enrolledAt    DateTime? @db.Date
+  graduatedAt   DateTime? @db.Date
+  /// Произвольные «Other info» поля, настраиваемые админом
+  extra         Json      @default("{}")
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  guardians         StudentGuardian[]
+  groupMembers      GroupMember[]
+  enrollments       CourseEnrollment[]
+  advisors          StudentAdvisor[]
+  accommodations    StudentAccommodation[]
+  flags             StudentFlag[]
+  teacherNotes      TeacherNote[]
+  files             StudentFile[]
+  submissions       Submission[]
+  evaluations       Evaluation[]
+  periodGrades      PeriodGrade[]
+  attendanceRecords AttendanceRecord[]
+  excusals          Excusal[]
+  predictedGrades   PredictedGrade[]
+  portfolioPosts    PortfolioPost[]
+  projects          Project[]
+  progressReports   ProgressReport[]
+  componentProgress StudentComponentProgress[]
+  casPortfolio      CasPortfolio?
+}
+
+/// [R1/R2] Родитель/законный представитель.
+model GuardianProfile {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @unique @db.Uuid
+  phone  String?
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  students StudentGuardian[]
+}
+
+/// [R1] Связь родитель ↔ ребёнок; invite по email или коду; одобрение админом.
+model StudentGuardian {
+  id          String   @id @default(uuid()) @db.Uuid
+  studentId   String   @db.Uuid
+  guardianId  String   @db.Uuid
+  relation    String?
+  approved    Boolean  @default(false)
+  invitedAt   DateTime?
+  connectedAt DateTime?
+  student     StudentProfile  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  guardian    GuardianProfile @relation(fields: [guardianId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, guardianId])
+}
+
+/// [R1] Заявка/приглашение семьи (email или код).
+model FamilyInvite {
+  id         String    @id @default(uuid()) @db.Uuid
+  schoolId   String    @db.Uuid
+  studentId  String    @db.Uuid
+  email      String?
+  codeHash   String?
+  expiresAt  DateTime?
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([schoolId, studentId])
+}
+
+/// [R1] Куратор (homeroom advisor) ученика на учебный год.
+model StudentAdvisor {
+  id             String @id @default(uuid()) @db.Uuid
+  academicYearId String @db.Uuid
+  studentId      String @db.Uuid
+  staffId        String @db.Uuid
+  student        StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  staff          StaffProfile   @relation(fields: [staffId], references: [id])
+  academicYear   AcademicYear   @relation(fields: [academicYearId], references: [id])
+
+  @@unique([academicYearId, studentId, staffId])
+}
+
+/// [R1] Особые условия (ОВЗ, Приложение 5 политики): время +25%, ассистент и т.д.
+model StudentAccommodation {
+  id          String    @id @default(uuid()) @db.Uuid
+  studentId   String    @db.Uuid
+  kind        String    // 'extra_time_25','reader','scribe','proctor','separate_room',...
+  validFrom   DateTime? @db.Date
+  validTo     DateTime? @db.Date
+  orderNumber String?   // приказ директора
+  documentFileId String? @db.Uuid
+  notes       String?
+  student     StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+}
+
+/// [R1] Флаги студента (active / expired).
+model StudentFlag {
+  id        String    @id @default(uuid()) @db.Uuid
+  studentId String    @db.Uuid
+  title     String
+  note      String?
+  expiresAt DateTime?
+  archived  Boolean   @default(false)
+  createdById String? @db.Uuid
+  createdAt DateTime  @default(now())
+  student   StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+}
+
+/// [R1] Заметки педагогов о студенте (внутренние).
+model TeacherNote {
+  id        String   @id @default(uuid()) @db.Uuid
+  studentId String   @db.Uuid
+  authorId  String   @db.Uuid
+  body      String
+  createdAt DateTime @default(now())
+  student   StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+}
+
+/// [R2] Папки/файлы студента («Student files»).
+model StudentFile {
+  id        String   @id @default(uuid()) @db.Uuid
+  studentId String   @db.Uuid
+  folder    String?
+  fileId    String   @db.Uuid
+  createdAt DateTime @default(now())
+  student   StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+}
+
+/// [R1] Файловое хранилище (S3-совместимое): метаданные.
+model FileAsset {
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @db.Uuid
+  storageKey  String   @unique
+  fileName    String
+  mimeType    String
+  sizeBytes   BigInt
+  checksum    String?
+  uploadedById String? @db.Uuid
+  scanStatus  String   @default("pending") // antivirus
+  createdAt   DateTime @default(now())
+  deletedAt   DateTime?
+  school      School   @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId, uploadedById])
+}
+
+// ============================ 2. УЧЕБНАЯ СТРУКТУРА ===========================
+
+/// [R1]
+model AcademicYear {
+  id        String   @id @default(uuid()) @db.Uuid
+  schoolId  String   @db.Uuid
+  name      String   // 2026-27
+  startDate DateTime @db.Date
+  endDate   DateTime @db.Date
+  isCurrent Boolean  @default(false)
+  school    School   @relation(fields: [schoolId], references: [id])
+
+  periods     GradingPeriod[]
+  yearGroups  YearGroupYear[]
+  courses     Course[]
+  advisors    StudentAdvisor[]
+  bellSchedules BellSchedule[]
+  routines    Routine[]
+  scheduleDays ScheduleDay[]
+  calendarEvents CalendarEvent[]
+
+  @@unique([schoolId, name])
+}
+
+/// [R1] Периоды оценивания: Term 1–4 (REPORTING), Semester 1/2 и Final (CUMULATIVE).
+model GradingPeriod {
+  id             String     @id @default(uuid()) @db.Uuid
+  academicYearId String     @db.Uuid
+  programmeId    String     @db.Uuid
+  name           String
+  abbreviation   String
+  kind           PeriodKind
+  startDate      DateTime   @db.Date
+  endDate        DateTime   @db.Date
+  sortOrder      Int
+  locked         Boolean    @default(false) // блокировка внесения оценок
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id])
+  programme      Programme    @relation(fields: [programmeId], references: [id])
+
+  contributesTo  PeriodContribution[] @relation("Parent")
+  contributions  PeriodContribution[] @relation("Child")
+  categoryWeights CategoryWeight[]
+  assignments    Assignment[]
+  periodGrades   PeriodGrade[]
+  finalSetups    FinalGradeSetup[]
+  reports        ProgressReport[]
+
+  @@unique([academicYearId, programmeId, abbreviation])
+}
+
+/// [R1] Из каких reporting-периодов складывается cumulative (S1 = T1+T2) с весом.
+model PeriodContribution {
+  id        String @id @default(uuid()) @db.Uuid
+  parentId  String @db.Uuid
+  childId   String @db.Uuid
+  weight    Decimal @default(1) @db.Decimal(6, 3)
+  parent    GradingPeriod @relation("Parent", fields: [parentId], references: [id], onDelete: Cascade)
+  child     GradingPeriod @relation("Child", fields: [childId], references: [id], onDelete: Cascade)
+
+  @@unique([parentId, childId])
+}
+
+/// [R1] Параллель (Batch of 2028) — «вечная» сущность выпуска; Grade — её название в году.
+model YearGroup {
+  id          String @id @default(uuid()) @db.Uuid
+  programmeId String @db.Uuid
+  batchLabel  String // "Batch of 2028"
+  graduationYear Int
+  programme   Programme @relation(fields: [programmeId], references: [id])
+
+  years       YearGroupYear[]
+  groups      StudentGroup[]
+
+  @@unique([programmeId, graduationYear])
+}
+
+/// [R1] Какой «класс-год» (Grade 9 / DP1) параллель проходит в этом году.
+model YearGroupYear {
+  id             String @id @default(uuid()) @db.Uuid
+  yearGroupId    String @db.Uuid
+  academicYearId String @db.Uuid
+  gradeLabel     String // "Grade 9", "DP 1"
+  gradeNumber    Int    // 7,8,9,10(DP1),11(DP2)
+  yearGroup      YearGroup    @relation(fields: [yearGroupId], references: [id])
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id])
+
+  @@unique([yearGroupId, academicYearId])
+}
+
+/// [R1]
+model Department {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+  name     Json
+  school   School @relation(fields: [schoolId], references: [id])
+  staff    StaffProfile[]
+}
+
+/// [R1] Предметная группа MYP / G1–G6 DP.
+model SubjectGroup {
+  id        String @id @default(uuid()) @db.Uuid
+  schoolId  String @db.Uuid
+  code      String // 'G1','LANG_LIT','SCI'
+  name      Json
+  sortOrder Int    @default(0)
+  school    School @relation(fields: [schoolId], references: [id])
+  subjects  Subject[]
+
+  @@unique([schoolId, code])
+}
+
+/// [R1] Предмет (в т.ч. версия IB-программы: first/last assessment).
+model Subject {
+  id                String   @id @default(uuid()) @db.Uuid
+  programmeId       String   @db.Uuid
+  subjectGroupId    String?  @db.Uuid
+  name              Json
+  ibCode            String?
+  firstAssessment   Int?
+  lastAssessment    Int?
+  isCore            Boolean  @default(false) // CAS, EE, TOK…
+  isLocal           Boolean  @default(false) // локальные предметы РК
+  programme         Programme    @relation(fields: [programmeId], references: [id])
+  subjectGroup      SubjectGroup? @relation(fields: [subjectGroupId], references: [id])
+
+  courses           Course[]
+  criteria          Criterion[]
+  datasetLinks      SubjectDatasetItem[]
+  assessmentComponents AssessmentComponent[]
+  finalSetups       FinalGradeSetup[]
+
+  @@index([programmeId])
+}
+
+/// [R1] Группа студентов (параллель, 7A, подгруппа «7A 1 group Design»).
+model StudentGroup {
+  id          String    @id @default(uuid()) @db.Uuid
+  yearGroupId String?   @db.Uuid
+  academicYearId String @db.Uuid
+  kind        GroupKind
+  name        String
+  yearGroup   YearGroup? @relation(fields: [yearGroupId], references: [id])
+
+  members     GroupMember[]
+  courses     CourseGroup[]
+
+  @@index([academicYearId, kind])
+}
+
+model GroupMember {
+  groupId   String @db.Uuid
+  studentId String @db.Uuid
+  group     StudentGroup   @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  student   StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, studentId])
+}
+
+/// [R1] Курс = «класс» в терминах Toddle: группа × предмет (× уровень SL/HL) на учебный год.
+model Course {
+  id             String      @id @default(uuid()) @db.Uuid
+  schoolId       String      @db.Uuid
+  academicYearId String      @db.Uuid
+  programmeId    String      @db.Uuid
+  subjectId      String      @db.Uuid
+  name           String      // "G7A Science"
+  classCode      String?     // Class ID
+  level          CourseLevel @default(NONE)
+  iconKey        String?
+  color          String?
+  archived       Boolean     @default(false)
+  settings       Json        @default("{}")  // class settings: видимость, режим уведомлений…
+  createdAt      DateTime    @default(now())
+  deletedAt      DateTime?
+
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id])
+  programme    Programme    @relation(fields: [programmeId], references: [id])
+  subject      Subject      @relation(fields: [subjectId], references: [id])
+
+  groups       CourseGroup[]
+  staff        CourseStaff[]
+  enrollments  CourseEnrollment[]
+  units        Unit[]
+  assignments  Assignment[]
+  timetable    TimetableEntry[]
+  periodGrades PeriodGrade[]
+  announcements Announcement[]
+  driveItems   ClassDriveItem[]
+  weeklyPlans  WeeklyPlanner[]
+  predictedGrades PredictedGrade[]
+  gradingOverrides CourseGradingSettings?
+
+  @@index([schoolId, academicYearId])
+  @@index([subjectId])
+}
+
+model CourseGroup {
+  courseId String @db.Uuid
+  groupId  String @db.Uuid
+  course   Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  group    StudentGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([courseId, groupId])
+}
+
+/// [R1] Учителя курса (primary / co-teacher).
+model CourseStaff {
+  courseId  String  @db.Uuid
+  staffId   String  @db.Uuid
+  isPrimary Boolean @default(false)
+  course    Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  staff     StaffProfile @relation(fields: [staffId], references: [id])
+
+  @@id([courseId, staffId])
+}
+
+/// [R1] Зачисление ученика в курс (из групп + индивидуальные добавления).
+model CourseEnrollment {
+  courseId  String           @db.Uuid
+  studentId String           @db.Uuid
+  status    EnrollmentStatus @default(ACTIVE)
+  joinedAt  DateTime         @default(now())
+  leftAt    DateTime?
+  course    Course         @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  student   StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([courseId, studentId])
+  @@index([studentId])
+}
+
+// ============================ 3. КАТАЛОГИ IB (ДАННЫЕ) ========================
+
+/// [R1] Критерии предмета (MYP A–D; DP — рубрики по компонентам).
+model Criterion {
+  id         String  @id @default(uuid()) @db.Uuid
+  subjectId  String  @db.Uuid
+  yearBand   Int     @default(0)  // MYP year 1/3/5 (0 = любой)
+  phase      String?             // language acquisition phase
+  code       String               // A, B, C, D
+  name       Json
+  maxLevel   Int     @default(8)
+  subject    Subject @relation(fields: [subjectId], references: [id])
+
+  strands      CriterionStrand[]
+  descriptors  CriterionDescriptor[]
+  assignmentLinks AssignmentCriterion[]
+  criterionGrades CriterionGrade[]
+  evaluations  CriterionEvaluation[]
+
+  @@unique([subjectId, yearBand, phase, code])
+}
+
+model CriterionStrand {
+  id          String @id @default(uuid()) @db.Uuid
+  criterionId String @db.Uuid
+  label       String // i, ii, iii
+  text        Json
+  criterion   Criterion @relation(fields: [criterionId], references: [id], onDelete: Cascade)
+}
+
+/// Дескриптор уровня: полоса 1–2, 3–4, …
+model CriterionDescriptor {
+  id          String @id @default(uuid()) @db.Uuid
+  criterionId String @db.Uuid
+  levelFrom   Int
+  levelTo     Int
+  text        Json
+  criterion   Criterion @relation(fields: [criterionId], references: [id], onDelete: Cascade)
+}
+
+/// [R1] Универсальные датасеты: ATL, Key/Related concepts, Global contexts, LP, DP aims/objectives/syllabus.
+model Dataset {
+  id       String      @id @default(uuid()) @db.Uuid
+  schoolId String      @db.Uuid
+  kind     DatasetKind
+  name     Json
+  isSystem Boolean     @default(false)
+  items    DatasetItem[]
+}
+
+model DatasetItem {
+  id        String  @id @default(uuid()) @db.Uuid
+  datasetId String  @db.Uuid
+  parentId  String? @db.Uuid         // иерархия (ATL category → skill; syllabus разделы)
+  code      String?
+  title     Json
+  description Json?
+  sortOrder Int     @default(0)
+  dataset   Dataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  parent    DatasetItem?  @relation("ItemTree", fields: [parentId], references: [id])
+  children  DatasetItem[] @relation("ItemTree")
+
+  subjectLinks SubjectDatasetItem[]
+  unitLinks    UnitDatasetItem[]
+  assignmentLinks AssignmentDatasetItem[]
+}
+
+/// Привязка пункта датасета к предмету/уровню (aims DP по предмету, syllabus по SL/HL, concepts по предметным группам).
+model SubjectDatasetItem {
+  subjectId     String      @db.Uuid
+  datasetItemId String      @db.Uuid
+  level         CourseLevel @default(NONE)
+  subject       Subject     @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  datasetItem   DatasetItem @relation(fields: [datasetItemId], references: [id], onDelete: Cascade)
+
+  @@id([subjectId, datasetItemId, level])
+}
+
+// ============================ 4. ОЦЕНИВАНИЕ — НАСТРОЙКИ (раздел 8.2) =========
+
+/// [R1] Политика оценивания по программе/году. Все «магические числа» — здесь.
+model GradingPolicy {
+  id               String               @id @default(uuid()) @db.Uuid
+  programmeId      String               @db.Uuid
+  academicYearId   String?              @db.Uuid
+  criterionAggregation CriterionAggregation @default(MEAN_ROUND_HALF_UP)
+  roundHalfUp      Boolean              @default(true)
+  useCriteriaMethod Boolean             @default(true)  // MYP: критериальная схема основная
+  usePercentMethod Boolean              @default(true)  // параллельная процентная (25/75)
+  maxSummativePerDay Int                @default(3)
+  oneCriterionOncePerPeriod Boolean     @default(true)
+  allowFormativeInFinal Boolean         @default(false)
+  annualWeights    Json                 @default("{\"S1\":0.5,\"S2\":0.5}")
+  examWeight       Decimal?             @db.Decimal(4, 3)  // 9 кл.: 50% экзамен + 50% годовая
+  fiveScaleOnlyForFinal Boolean         @default(true)
+  validFrom        DateTime?            @db.Date
+  programme        Programme            @relation(fields: [programmeId], references: [id])
+
+  boundarySets     GradeBoundarySet[]
+  percentToGrade   PercentGradeBand[]
+}
+
+/// [R1] Таблица «сумма уровней → оценка 1–7» по числу оценённых критериев (Прил. 1 и 4).
+model GradeBoundarySet {
+  id             String @id @default(uuid()) @db.Uuid
+  policyId       String @db.Uuid
+  criteriaCount  Int    // 4,3,2,1
+  policy         GradingPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  boundaries     GradeBoundary[]
+
+  @@unique([policyId, criteriaCount])
+}
+
+model GradeBoundary {
+  id        String @id @default(uuid()) @db.Uuid
+  setId     String @db.Uuid
+  grade     Int    // 1..7
+  minTotal  Int
+  maxTotal  Int
+  set       GradeBoundarySet @relation(fields: [setId], references: [id], onDelete: Cascade)
+
+  @@unique([setId, grade])
+}
+
+/// [R1] Проценты → оценка 1–7 (0–14→1 … 85–100→7) для DP и процентной схемы MYP.
+model PercentGradeBand {
+  id        String  @id @default(uuid()) @db.Uuid
+  policyId  String  @db.Uuid
+  grade     Int
+  minPct    Decimal @db.Decimal(5, 2)
+  maxPct    Decimal @db.Decimal(5, 2)
+  /// DP: можно переопределить на уровне курса (CourseGradingSettings)
+  policy    GradingPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  @@unique([policyId, grade])
+}
+
+/// [R1] Шкалы оценок: IB 1–7, TOK A–E, 5-балльная (DEPENDENT), спец-коды.
+model GradeScale {
+  id          String         @id @default(uuid()) @db.Uuid
+  programmeId String?        @db.Uuid
+  code        String
+  name        Json
+  type        GradeScaleType @default(REGULAR)
+  minValue    Decimal?       @db.Decimal(5, 2)
+  maxValue    Decimal?       @db.Decimal(5, 2)
+  isAlpha     Boolean        @default(false)
+  sourceScaleId String?      @db.Uuid     // для DEPENDENT: из какой шкалы конвертируется
+  programme   Programme?     @relation(fields: [programmeId], references: [id])
+  source      GradeScale?    @relation("ScaleSource", fields: [sourceScaleId], references: [id])
+  derived     GradeScale[]   @relation("ScaleSource")
+
+  entries     GradeScaleEntry[]
+  finalSetups FinalGradeSetup[]
+
+  @@unique([programmeId, code])
+}
+
+model GradeScaleEntry {
+  id        String  @id @default(uuid()) @db.Uuid
+  scaleId   String  @db.Uuid
+  label     String
+  numericValue Decimal? @db.Decimal(5, 2)
+  description Json?
+  color     String?
+  sortOrder Int
+  /// DEPENDENT: значения исходной шкалы, мапящиеся в эту запись (IB 6,7 → 5)
+  sourceValues Int[]
+  scale     GradeScale @relation(fields: [scaleId], references: [id], onDelete: Cascade)
+
+  @@index([scaleId])
+}
+
+/// [R1] Какая шкала и какой метод — для каждого предмета/года/периода (Final grade setup).
+model FinalGradeSetup {
+  id             String @id @default(uuid()) @db.Uuid
+  subjectId      String @db.Uuid
+  gradeNumber    Int
+  periodId       String @db.Uuid
+  primaryScaleId String @db.Uuid
+  additionalScaleIds String[] @default([])
+  method         String @default("SCORE_BASED") // SCORE_BASED | MYP_CRITERIA | STANDARDS
+  subject        Subject       @relation(fields: [subjectId], references: [id])
+  period         GradingPeriod @relation(fields: [periodId], references: [id])
+  primaryScale   GradeScale    @relation(fields: [primaryScaleId], references: [id])
+
+  @@unique([subjectId, gradeNumber, periodId])
+}
+
+/// [R1] Категории оценивания и веса по периодам: Formative 25 / Summative 75 (+ TOK Essay, TOK Exhibition).
+model GradingCategory {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+  code     String
+  name     Json
+  weights  CategoryWeight[]
+  assignments Assignment[]
+
+  @@unique([schoolId, code])
+}
+
+model CategoryWeight {
+  id         String  @id @default(uuid()) @db.Uuid
+  categoryId String  @db.Uuid
+  periodId   String  @db.Uuid
+  courseId   String? @db.Uuid  // переопределение на курс
+  weight     Decimal @db.Decimal(5, 2)
+  category   GradingCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  period     GradingPeriod   @relation(fields: [periodId], references: [id], onDelete: Cascade)
+
+  @@unique([categoryId, periodId, courseId])
+}
+
+/// [R1] Переопределения на курсе (границы %, шкала, критерии, видимость).
+model CourseGradingSettings {
+  courseId        String  @id @db.Uuid
+  percentBands    Json?    // переопределение процентных границ (DP)
+  enabledCriteria String[] @default([])
+  visibility      Json     @default("{}")
+  course          Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+}
+
+/// [R1] Правила видимости оценок для студентов/семей (Gradebook visibility settings).
+model GradebookVisibilityRule {
+  id          String  @id @default(uuid()) @db.Uuid
+  schoolId    String  @db.Uuid
+  programmeId String? @db.Uuid
+  audience    String  // STUDENT | FAMILY
+  scope       String  // FINAL | ASSESSMENT | STANDARDS | LEARNING_GOALS
+  settings    Json    // {subjectScore:'ALL_PERIODS', finalGrade:'PAST_PERIODS', aggregate:'HIDDEN',...}
+
+  @@unique([schoolId, programmeId, audience, scope])
+}
+
+// ============================ 5. ПЛАНИРОВАНИЕ (UNITS) ========================
+
+/// [R1] Шаблон планера юнита по программе (набор секций — JSON-схема).
+model PlannerTemplate {
+  id          String @id @default(uuid()) @db.Uuid
+  programmeId String @db.Uuid
+  name        String
+  version     Int    @default(1)
+  sections    Json   // [{key,title:I18n,fields:[{key,type,datasetKind?,max?}]}]
+  programme   Programme @relation(fields: [programmeId], references: [id])
+  units       Unit[]
+}
+
+/// [R1] Юнит. content — значения полей по шаблону (TipTap JSON, массивы вопросов и т.д.).
+model Unit {
+  id          String   @id @default(uuid()) @db.Uuid
+  courseId    String   @db.Uuid
+  templateId  String   @db.Uuid
+  title       Json?
+  startDate   DateTime? @db.Date
+  endDate     DateTime? @db.Date
+  hours       Decimal?  @db.Decimal(6, 2)
+  level       CourseLevel @default(NONE)
+  sortOrder   Int       @default(0)
+  status      PublishStatus @default(DRAFT)
+  content     Json      @default("{}")
+  sharedWithStudents Boolean @default(false)
+  fromLibraryId String? @db.Uuid
+  createdById String?  @db.Uuid
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  course      Course          @relation(fields: [courseId], references: [id])
+  template    PlannerTemplate @relation(fields: [templateId], references: [id])
+  items       UnitItem[]
+  datasetLinks UnitDatasetItem[]
+  reflections UnitReflection[]
+  collaborators UnitCollaborator[]
+
+  @@index([courseId, sortOrder])
+}
+
+model UnitCollaborator {
+  unitId  String @db.Uuid
+  staffId String @db.Uuid
+  unit    Unit   @relation(fields: [unitId], references: [id], onDelete: Cascade)
+
+  @@id([unitId, staffId])
+}
+
+/// Привязки юнита к ATL/концептам/aims/syllabus…
+model UnitDatasetItem {
+  unitId        String @db.Uuid
+  datasetItemId String @db.Uuid
+  field         String // ключ поля шаблона: 'atl','keyConcept','aims','syllabus'
+  note          String?
+  unit          Unit        @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  datasetItem   DatasetItem @relation(fields: [datasetItemId], references: [id])
+
+  @@id([unitId, datasetItemId, field])
+}
+
+/// [R1] Unit flow: папки, LE/FA/SA/Worksheet/Note/Link.
+model UnitItem {
+  id         String       @id @default(uuid()) @db.Uuid
+  unitId     String       @db.Uuid
+  parentId   String?      @db.Uuid
+  type       UnitItemType
+  title      String
+  body       Json?
+  url        String?
+  sortOrder  Int          @default(0)
+  assignmentId String?    @unique @db.Uuid
+  unit       Unit         @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  parent     UnitItem?    @relation("ItemFolder", fields: [parentId], references: [id])
+  children   UnitItem[]   @relation("ItemFolder")
+  assignment Assignment?  @relation(fields: [assignmentId], references: [id])
+}
+
+/// [R2] Reflection по юниту (до/в процессе/после).
+model UnitReflection {
+  id      String @id @default(uuid()) @db.Uuid
+  unitId  String @db.Uuid
+  phase   String // 'before','during','after'
+  body    Json
+  authorId String @db.Uuid
+  unit    Unit   @relation(fields: [unitId], references: [id], onDelete: Cascade)
+}
+
+/// [R2] Weekly planner.
+model WeeklyPlanner {
+  id        String   @id @default(uuid()) @db.Uuid
+  courseId  String   @db.Uuid
+  weekStart DateTime @db.Date
+  content   Json
+  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+}
+
+/// [R2] Школьная библиотека юнитов/заданий (шаринг между учителями).
+model LibraryItem {
+  id        String   @id @default(uuid()) @db.Uuid
+  schoolId  String   @db.Uuid
+  kind      String   // 'unit' | 'assignment'
+  refId     String   @db.Uuid
+  snapshot  Json     // снимок для копирования
+  createdById String @db.Uuid
+  createdAt DateTime @default(now())
+
+  @@index([schoolId, kind])
+}
+
+// ============================ 6. ЗАДАНИЯ И ОЦЕНКИ ============================
+
+/// [R1] Задание/оценивание (FA/SA/LE/Worksheet/Quick task).
+model Assignment {
+  id            String         @id @default(uuid()) @db.Uuid
+  courseId      String         @db.Uuid
+  type          AssignmentType
+  title         String
+  instructions  Json?
+  periodId      String?        @db.Uuid
+  categoryId    String?        @db.Uuid
+  status        PublishStatus  @default(DRAFT)
+  publishAt     DateTime?
+  openAt        DateTime?
+  dueAt         DateTime?
+  closeAt       DateTime?
+  submissionsEnabled Boolean   @default(true)
+  maxScore      Decimal?       @db.Decimal(8, 2)
+  /// MYP суммативные: общий балл НЕ показывается (политика п.14) — флаг
+  hideTotalFromStudents Boolean @default(false)
+  isSummativeDate Boolean      @default(false)  // участвует в календаре СУМ и лимите 3/день
+  createdById   String?        @db.Uuid
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  deletedAt     DateTime?
+
+  course        Course          @relation(fields: [courseId], references: [id])
+  period        GradingPeriod?  @relation(fields: [periodId], references: [id])
+  category      GradingCategory? @relation(fields: [categoryId], references: [id])
+
+  criteria      AssignmentCriterion[]
+  targets       AssignmentTarget[]
+  attachments   AssignmentAttachment[]
+  datasetLinks  AssignmentDatasetItem[]
+  submissions   Submission[]
+  evaluations   Evaluation[]
+  unitItem      UnitItem?
+  rubric        AssessmentRubric?
+
+  @@index([courseId, dueAt])
+  @@index([periodId, categoryId])
+}
+
+/// Какие критерии оцениваются и максимум по ним.
+model AssignmentCriterion {
+  assignmentId String @db.Uuid
+  criterionId  String @db.Uuid
+  maxLevel     Int    @default(8)
+  assignment   Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  criterion    Criterion  @relation(fields: [criterionId], references: [id])
+
+  @@id([assignmentId, criterionId])
+}
+
+/// Кому назначено (вся группа курса или выбранные ученики/подгруппы; 3 варианта СУМ).
+model AssignmentTarget {
+  id           String  @id @default(uuid()) @db.Uuid
+  assignmentId String  @db.Uuid
+  studentId    String? @db.Uuid
+  groupId      String? @db.Uuid
+  variant      Int     @default(1) // вариант работы (1,2 — основной период; 3 — для пропустивших)
+  assignment   Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  @@index([assignmentId])
+}
+
+model AssignmentAttachment {
+  id           String @id @default(uuid()) @db.Uuid
+  assignmentId String @db.Uuid
+  fileId       String? @db.Uuid
+  url          String?
+  title        String?
+  assignment   Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+}
+
+model AssignmentDatasetItem {
+  assignmentId  String @db.Uuid
+  datasetItemId String @db.Uuid
+  assignment    Assignment  @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  datasetItem   DatasetItem @relation(fields: [datasetItemId], references: [id])
+
+  @@id([assignmentId, datasetItemId])
+}
+
+/// [R1] Рубрика/чек-лист/single-point как JSON-структура (MYP descriptors 0–8, DP criteria).
+model AssessmentRubric {
+  id           String  @id @default(uuid()) @db.Uuid
+  assignmentId String  @unique @db.Uuid
+  kind         String  // RUBRIC | CHECKLIST | SINGLE_POINT | SCORE | STANDARDS
+  definition   Json
+  assignment   Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+}
+
+/// [R1] Сдача работы учеником.
+model Submission {
+  id           String           @id @default(uuid()) @db.Uuid
+  assignmentId String           @db.Uuid
+  studentId    String           @db.Uuid
+  status       SubmissionStatus @default(NOT_SUBMITTED)
+  submittedAt  DateTime?
+  body         Json?
+  makeupUntil  DateTime?        // «в течение недели» при уважительной причине
+  absenceNote  String?
+  absenceDocFileId String?      @db.Uuid
+  assignment   Assignment       @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  student      StudentProfile   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  files        SubmissionFile[]
+  similarityScore Decimal?      @db.Decimal(5, 2)
+
+  @@unique([assignmentId, studentId])
+}
+
+model SubmissionFile {
+  id           String @id @default(uuid()) @db.Uuid
+  submissionId String @db.Uuid
+  fileId       String @db.Uuid
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+}
+
+/// [R1] Оценка студента по заданию.
+model Evaluation {
+  id           String           @id @default(uuid()) @db.Uuid
+  assignmentId String           @db.Uuid
+  studentId    String           @db.Uuid
+  status       EvaluationStatus @default(NOT_EVALUATED)
+  score        Decimal?         @db.Decimal(8, 2)
+  /// DP/буквенный результат
+  gradeLabel   String?
+  comment      Json?            // rich text/комментарий
+  evaluatedById String?         @db.Uuid
+  evaluatedAt  DateTime?
+  sharedAt     DateTime?
+  assignment   Assignment       @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  student      StudentProfile   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  criteria     CriterionEvaluation[]
+
+  @@unique([assignmentId, studentId])
+  @@index([studentId])
+}
+
+/// [R1] Уровень по критерию за конкретную работу (0–8).
+model CriterionEvaluation {
+  evaluationId String @db.Uuid
+  criterionId  String @db.Uuid
+  level        Int?
+  comment      String?
+  evaluation   Evaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+  criterion    Criterion  @relation(fields: [criterionId], references: [id])
+
+  @@id([evaluationId, criterionId])
+}
+
+/// [R2] Комментарии/обратная связь по сдаче (диалог учитель–ученик).
+model SubmissionComment {
+  id           String   @id @default(uuid()) @db.Uuid
+  submissionId String   @db.Uuid
+  authorId     String   @db.Uuid
+  body         String
+  createdAt    DateTime @default(now())
+
+  @@index([submissionId])
+}
+
+// ============================ 7. ИТОГОВЫЕ ОЦЕНКИ (GRADEBOOK) =================
+
+/// [R1] Итог студента по курсу за период. Хранится как кэш расчёта + ручной override.
+model PeriodGrade {
+  id           String   @id @default(uuid()) @db.Uuid
+  courseId     String   @db.Uuid
+  studentId    String   @db.Uuid
+  periodId     String   @db.Uuid
+  criteriaSum  Int?                      // сумма уровней (MYP)
+  criteriaCount Int?                     // сколько критериев оценено
+  overallPct   Decimal? @db.Decimal(6, 2) // процентная схема / DP Overall score
+  grade7       Int?                      // IB 1–7 (рассчитано)
+  grade5       Int?                      // 5-балльная (только итоговые; см. политику)
+  gradeOverride7 Int?                    // ручной override (разрешён)
+  gradeOverride5 Int?
+  overriddenById String? @db.Uuid
+  overriddenAt DateTime?
+  published    Boolean  @default(false)
+  calculatedAt DateTime?
+  course       Course         @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  student      StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  period       GradingPeriod  @relation(fields: [periodId], references: [id])
+
+  criterionGrades CriterionGrade[]
+
+  @@unique([courseId, studentId, periodId])
+  @@index([studentId, periodId])
+}
+
+/// [R1] Итоговый уровень критерия за период (агрегация суммативных).
+model CriterionGrade {
+  periodGradeId String @db.Uuid
+  criterionId   String @db.Uuid
+  level         Int?
+  overrideLevel Int?
+  periodGrade   PeriodGrade @relation(fields: [periodGradeId], references: [id], onDelete: Cascade)
+  criterion     Criterion   @relation(fields: [criterionId], references: [id])
+
+  @@id([periodGradeId, criterionId])
+}
+
+/// [R2] Predicted grade (DP; в MYP — опционально).
+model PredictedGrade {
+  id        String   @id @default(uuid()) @db.Uuid
+  studentId String   @db.Uuid
+  courseId  String   @db.Uuid
+  grade     Int
+  note      String?
+  setById   String?  @db.Uuid
+  setAt     DateTime @default(now())
+  student   StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  course    Course         @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@index([studentId, courseId])
+}
+
+/// [R1] Оценки интердисциплинарного юнита / итоги MYP (pass/fail, 3–7), экзамены 9 кл.
+model ProgrammeResult {
+  id        String  @id @default(uuid()) @db.Uuid
+  studentId String  @db.Uuid
+  academicYearId String @db.Uuid
+  kind      String  // INTERDISCIPLINARY | EXAM_9 | PP_RESULT | SERVICE_RESULT | FINAL_9
+  value     Decimal? @db.Decimal(6, 2)
+  passed    Boolean?
+  detail    Json?
+
+  @@index([studentId, kind])
+}
+
+// ============================ 8. РАСПИСАНИЕ И ПОСЕЩАЕМОСТЬ ===================
+
+/// [R1] Периоды дня (P1–P8, перемены).
+model TimetablePeriod {
+  id        String  @id @default(uuid()) @db.Uuid
+  schoolId  String  @db.Uuid
+  name      String
+  isBreak   Boolean @default(false)
+  sortOrder Int
+  slots     BellSlot[]
+}
+
+/// [R1] Расписание звонков (Regular, Grade 9).
+model BellSchedule {
+  id             String @id @default(uuid()) @db.Uuid
+  academicYearId String @db.Uuid
+  name           String
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id])
+  slots          BellSlot[]
+  routineDays    RoutineDay[]
+  scheduleDays   ScheduleDay[]
+}
+
+model BellSlot {
+  id            String @id @default(uuid()) @db.Uuid
+  bellScheduleId String @db.Uuid
+  periodId      String @db.Uuid
+  startTime     String // "08:40"
+  endTime       String // "09:20"
+  bellSchedule  BellSchedule    @relation(fields: [bellScheduleId], references: [id], onDelete: Cascade)
+  period        TimetablePeriod @relation(fields: [periodId], references: [id])
+  entries       TimetableEntry[]
+
+  @@unique([bellScheduleId, periodId])
+}
+
+/// [R1] Routine: цикл дней и применяемые параллели.
+model Routine {
+  id             String @id @default(uuid()) @db.Uuid
+  academicYearId String @db.Uuid
+  name           String
+  validFrom      DateTime @db.Date
+  validTo        DateTime @db.Date
+  cycleDays      Int      @default(5)
+  gradeNumbers   Int[]    @default([])
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id])
+  days           RoutineDay[]
+}
+
+model RoutineDay {
+  id             String @id @default(uuid()) @db.Uuid
+  routineId      String @db.Uuid
+  dayIndex       Int    // 1..cycleDays
+  bellScheduleId String @db.Uuid
+  routine        Routine      @relation(fields: [routineId], references: [id], onDelete: Cascade)
+  bellSchedule   BellSchedule @relation(fields: [bellScheduleId], references: [id])
+
+  @@unique([routineId, dayIndex])
+}
+
+/// [R1] Календарь: для каждой даты — день цикла и звонки (+ нерабочие дни).
+model ScheduleDay {
+  id             String   @id @default(uuid()) @db.Uuid
+  academicYearId String   @db.Uuid
+  date           DateTime @db.Date
+  dayIndex       Int?
+  bellScheduleId String?  @db.Uuid
+  isNonWorking   Boolean  @default(false)
+  label          String?
+  academicYear   AcademicYear  @relation(fields: [academicYearId], references: [id])
+  bellSchedule   BellSchedule? @relation(fields: [bellScheduleId], references: [id])
+
+  @@unique([academicYearId, date])
+}
+
+/// [R1] Запись расписания: курс × слот × день цикла (импорт из aSc/EduPage).
+model TimetableEntry {
+  id         String  @id @default(uuid()) @db.Uuid
+  courseId   String  @db.Uuid
+  slotId     String  @db.Uuid
+  dayIndex   Int
+  room       String?
+  teacherId  String? @db.Uuid
+  validFrom  DateTime @db.Date
+  validTo    DateTime @db.Date
+  importId   String? @db.Uuid
+  course     Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  slot       BellSlot @relation(fields: [slotId], references: [id])
+  sessions   AttendanceSession[]
+
+  @@index([courseId])
+  @@index([dayIndex, slotId])
+}
+
+/// [R1] Журнал импортов расписания.
+model TimetableImport {
+  id          String    @id @default(uuid()) @db.Uuid
+  schoolId    String    @db.Uuid
+  source      ExternalSource
+  fileId      String?   @db.Uuid
+  status      JobStatus @default(PENDING)
+  validFrom   DateTime? @db.Date
+  validTo     DateTime? @db.Date
+  stats       Json?
+  errors      Json?
+  importedById String?  @db.Uuid
+  createdAt   DateTime  @default(now())
+}
+
+/// [R1] Настраиваемые коды посещаемости (Present/Absent/Late/Excused/Olympiad…).
+model AttendanceCode {
+  id        String         @id @default(uuid()) @db.Uuid
+  schoolId  String         @db.Uuid
+  code      String
+  name      Json
+  kind      AttendanceKind
+  countsAsPresent Boolean  @default(false)
+  color     String?
+  active    Boolean        @default(true)
+  records   AttendanceRecord[]
+
+  @@unique([schoolId, code])
+}
+
+/// [R1] Конкретный урок (дата × запись расписания) — «отмечен/не отмечен».
+model AttendanceSession {
+  id          String   @id @default(uuid()) @db.Uuid
+  entryId     String   @db.Uuid
+  date        DateTime @db.Date
+  markedById  String?  @db.Uuid
+  markedAt    DateTime?
+  entry       TimetableEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  records     AttendanceRecord[]
+
+  @@unique([entryId, date])
+  @@index([date])
+}
+
+model AttendanceRecord {
+  sessionId String  @db.Uuid
+  studentId String  @db.Uuid
+  codeId    String  @db.Uuid
+  note      String?
+  session   AttendanceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  student   StudentProfile    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  code      AttendanceCode    @relation(fields: [codeId], references: [id])
+
+  @@id([sessionId, studentId])
+  @@index([studentId])
+}
+
+/// [R1] Пороги уровней посещаемости (Excellent / At Risk).
+model AttendanceTier {
+  id       String  @id @default(uuid()) @db.Uuid
+  schoolId String  @db.Uuid
+  name     String
+  minPct   Decimal @db.Decimal(5, 2)
+  maxPct   Decimal @db.Decimal(5, 2)
+  color    String?
+}
+
+/// [R1/R2] Заявка на отсутствие (excusal) от семьи/ученика.
+model Excusal {
+  id          String        @id @default(uuid()) @db.Uuid
+  studentId   String        @db.Uuid
+  fromDate    DateTime      @db.Date
+  toDate      DateTime      @db.Date
+  reason      String?
+  fileId      String?       @db.Uuid
+  status      ExcusalStatus @default(PENDING)
+  createdById String        @db.Uuid
+  decidedById String?       @db.Uuid
+  decidedAt   DateTime?
+  student     StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId, status])
+}
+
+// ============================ 9. КОММУНИКАЦИИ ================================
+
+/// [R2] Объявления (школа/курс).
+model Announcement {
+  id          String             @id @default(uuid()) @db.Uuid
+  schoolId    String             @db.Uuid
+  courseId    String?            @db.Uuid
+  authorId    String             @db.Uuid
+  title       String
+  body        Json
+  bannerFileId String?           @db.Uuid
+  status      AnnouncementStatus @default(DRAFT)
+  publishAt   DateTime?
+  createdAt   DateTime           @default(now())
+  course      Course?            @relation(fields: [courseId], references: [id])
+  recipients  AnnouncementRecipient[]
+  attachments AnnouncementAttachment[]
+
+  @@index([schoolId, status])
+}
+
+model AnnouncementRecipient {
+  id             String            @id @default(uuid()) @db.Uuid
+  announcementId String            @db.Uuid
+  scope          RecipientScope
+  groupType      AudienceGroupType
+  refId          String?           @db.Uuid // school/grade/course/user
+  announcement   Announcement      @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+}
+
+model AnnouncementAttachment {
+  id             String  @id @default(uuid()) @db.Uuid
+  announcementId String  @db.Uuid
+  fileId         String? @db.Uuid
+  url            String?
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+}
+
+/// [R2] Личные чаты (учитель ↔ ученик/родитель) по настройкам школы.
+model Conversation {
+  id        String           @id @default(uuid()) @db.Uuid
+  schoolId  String           @db.Uuid
+  kind      ConversationKind @default(DIRECT)
+  title     String?
+  createdAt DateTime         @default(now())
+  participants ConversationParticipant[]
+  messages     Message[]
+}
+
+model ConversationParticipant {
+  conversationId String @db.Uuid
+  userId         String @db.Uuid
+  lastReadAt     DateTime?
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, userId])
+}
+
+model Message {
+  id             String   @id @default(uuid()) @db.Uuid
+  conversationId String   @db.Uuid
+  senderId       String   @db.Uuid
+  body           String?
+  audioFileId    String?  @db.Uuid
+  createdAt      DateTime @default(now())
+  editedAt       DateTime?
+  deletedAt      DateTime?
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User         @relation(fields: [senderId], references: [id])
+  attachments    MessageAttachment[]
+
+  @@index([conversationId, createdAt])
+}
+
+model MessageAttachment {
+  id        String @id @default(uuid()) @db.Uuid
+  messageId String @db.Uuid
+  fileId    String @db.Uuid
+  message   Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+}
+
+/// [R2] Портфолио (посты ученика/учителя, одобрение).
+model PortfolioPost {
+  id          String              @id @default(uuid()) @db.Uuid
+  studentId   String              @db.Uuid
+  courseId    String?             @db.Uuid
+  authorId    String              @db.Uuid
+  status      PortfolioPostStatus @default(DRAFT)
+  body        Json?
+  mediaType   String?             // photo|video|audio|file|note|collage|link|workbook
+  publishAt   DateTime?
+  approvedById String?            @db.Uuid
+  createdAt   DateTime            @default(now())
+  student     StudentProfile      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  media       PortfolioMedia[]
+  tags        PortfolioTag[]
+  comments    PortfolioComment[]
+
+  @@index([studentId, status])
+}
+
+model PortfolioMedia {
+  id     String @id @default(uuid()) @db.Uuid
+  postId String @db.Uuid
+  fileId String? @db.Uuid
+  url    String?
+  post   PortfolioPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+}
+
+model PortfolioTag {
+  postId        String @db.Uuid
+  datasetItemId String @db.Uuid   // ATL / критерий / LP attribute
+  post          PortfolioPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@id([postId, datasetItemId])
+}
+
+model PortfolioComment {
+  id       String @id @default(uuid()) @db.Uuid
+  postId   String @db.Uuid
+  authorId String @db.Uuid
+  body     String
+  post     PortfolioPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+}
+
+/// [R2] Class drive (папки/файлы курса).
+model ClassDriveItem {
+  id       String  @id @default(uuid()) @db.Uuid
+  courseId String  @db.Uuid
+  parentId String? @db.Uuid
+  name     String
+  fileId   String? @db.Uuid
+  isFolder Boolean @default(false)
+  course   Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  parent   ClassDriveItem?  @relation("DriveTree", fields: [parentId], references: [id])
+  children ClassDriveItem[] @relation("DriveTree")
+}
+
+/// [R2] Школьные документы («School policies and resources»), аудитория по ролям.
+model SchoolDocument {
+  id        String  @id @default(uuid()) @db.Uuid
+  schoolId  String  @db.Uuid
+  parentId  String? @db.Uuid
+  title     Json
+  fileId    String? @db.Uuid
+  isFolder  Boolean @default(false)
+  audience  RoleKey[]
+}
+
+/// [R1] Календарь: события школы/курса/класса (каникулы, суммативные работы и т.д.).
+model CalendarEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  schoolId       String   @db.Uuid
+  academicYearId String   @db.Uuid
+  title          String
+  tag            String   // HOLIDAY|SUMMATIVE|EXAM|EVENT|…
+  startsAt       DateTime
+  endsAt         DateTime?
+  allDay         Boolean  @default(false)
+  courseId       String?  @db.Uuid
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id])
+}
+
+// ============================ 10. УВЕДОМЛЕНИЯ ================================
+
+/// [R1] Матрица триггер × канал на уровне школы (Notifications manager).
+model NotificationRule {
+  id        String  @id @default(uuid()) @db.Uuid
+  schoolId  String  @db.Uuid
+  audience  String  // STAFF | STUDENT | FAMILY
+  trigger   String  // 'assessment_shared','due_tomorrow','attendance_marked','excusal',...
+  channels  NotificationChannel[]
+  enabled   Boolean @default(true)
+
+  @@unique([schoolId, audience, trigger])
+}
+
+/// Личные предпочтения пользователя.
+model NotificationPreference {
+  userId   String  @db.Uuid
+  trigger  String
+  channels NotificationChannel[]
+  user     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, trigger])
+}
+
+model Notification {
+  id         String   @id @default(uuid()) @db.Uuid
+  recipientId String  @db.Uuid
+  trigger    String
+  title      String
+  body       String?
+  entityType String?
+  entityId   String?  @db.Uuid
+  readAt     DateTime?
+  createdAt  DateTime @default(now())
+  recipient  User     @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  deliveries NotificationDelivery[]
+
+  @@index([recipientId, readAt])
+}
+
+model NotificationDelivery {
+  id             String  @id @default(uuid()) @db.Uuid
+  notificationId String  @db.Uuid
+  channel        NotificationChannel
+  status         JobStatus @default(PENDING)
+  sentAt         DateTime?
+  error          String?
+  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+}
+
+// ============================ 11. ПРОЕКТЫ И ЯДРО DP/MYP ======================
+
+/// [R3] Группа проектов (PP, CP, SAA, CAS, EE, TOK…) на параллель/год.
+model ProjectGroup {
+  id             String      @id @default(uuid()) @db.Uuid
+  schoolId       String      @db.Uuid
+  academicYearId String      @db.Uuid
+  yearGroupId    String      @db.Uuid
+  kind           ProjectKind
+  settings       Json        @default("{}") // supervision hours, visibility, auto-lock, similarity check
+  projects       Project[]
+  deadlines      ProjectDeadline[]
+  coordinators   ProjectCoordinator[]
+
+  @@unique([academicYearId, yearGroupId, kind])
+}
+
+model ProjectCoordinator {
+  groupId String @db.Uuid
+  staffId String @db.Uuid
+  group   ProjectGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, staffId])
+}
+
+/// Проект студента (PP, CP, EE, TOK Essay/Exhibition, SAA…).
+model Project {
+  id            String        @id @default(uuid()) @db.Uuid
+  groupId       String        @db.Uuid
+  studentId     String        @db.Uuid
+  supervisorId  String?       @db.Uuid
+  adviserId     String?       @db.Uuid
+  title         String?
+  subjectId     String?       @db.Uuid
+  researchQuestion String?    // EE
+  iaPrompt      String?       // TOK Exhibition
+  theme         String?
+  status        ProjectStatus @default(NOT_STARTED)
+  marks         Json?         // {A:6,B:5,C:7,total:18} либо {marks:/10,grade:'B'}
+  grade         String?
+  supervisionHours Decimal?   @db.Decimal(6, 2)
+  academicHonestyFormFileId String? @db.Uuid  // AHF
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  group         ProjectGroup  @relation(fields: [groupId], references: [id])
+  student       StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  meetings      ProjectMeeting[]
+  submissions   ProjectSubmission[]
+  reflections   ProjectReflection[]
+
+  @@unique([groupId, studentId])
+}
+
+model ProjectMeeting {
+  id        String   @id @default(uuid()) @db.Uuid
+  projectId String   @db.Uuid
+  index     Int      // 1,2,3 или 0=Summative (S)
+  heldAt    DateTime?
+  notes     Json?
+  lockedAt  DateTime?
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model ProjectDeadline {
+  id        String   @id @default(uuid()) @db.Uuid
+  groupId   String   @db.Uuid
+  key       String   // 'draft','final'
+  title     String
+  openAt    DateTime?
+  dueAt     DateTime?
+  closeAt   DateTime?
+  group     ProjectGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  submissions ProjectSubmission[]
+}
+
+model ProjectSubmission {
+  id         String   @id @default(uuid()) @db.Uuid
+  projectId  String   @db.Uuid
+  deadlineId String   @db.Uuid
+  fileId     String?  @db.Uuid
+  submittedAt DateTime?
+  similarityScore Decimal? @db.Decimal(5, 2)
+  project    Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  deadline   ProjectDeadline @relation(fields: [deadlineId], references: [id])
+
+  @@unique([projectId, deadlineId])
+}
+
+/// Рефлексии (EE RPF, RP, TOK interactions, CAS interviews) — блокируются после сдачи.
+model ProjectReflection {
+  id        String   @id @default(uuid()) @db.Uuid
+  projectId String   @db.Uuid
+  kind      String   // RPF | INTERACTION | INTERVIEW
+  body      Json
+  lockedAt  DateTime?
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+/// [R3] CAS: портфолио студента + опыт + learning outcomes + интервью.
+model CasPortfolio {
+  id          String   @id @default(uuid()) @db.Uuid
+  studentId   String   @unique @db.Uuid
+  adviserId   String?  @db.Uuid
+  student     StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  experiences CasExperience[]
+  outcomes    CasOutcomeAchievement[]
+  interviews  CasInterview[]
+}
+
+model CasExperience {
+  id          String   @id @default(uuid()) @db.Uuid
+  portfolioId String   @db.Uuid
+  title       String
+  strands     CasStrand[]
+  isProject   Boolean  @default(false)
+  startDate   DateTime? @db.Date
+  endDate     DateTime? @db.Date
+  hours       Decimal?  @db.Decimal(6, 2)
+  supervisorId String?  @db.Uuid
+  status      String?
+  portfolio   CasPortfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  evidences   CasEvidence[]
+}
+
+model CasEvidence {
+  id           String   @id @default(uuid()) @db.Uuid
+  experienceId String   @db.Uuid
+  kind         String   // EVIDENCE | REFLECTION
+  body         Json?
+  fileId       String?  @db.Uuid
+  createdAt    DateTime @default(now())
+  lockedAt     DateTime?
+  experience   CasExperience @relation(fields: [experienceId], references: [id], onDelete: Cascade)
+}
+
+model CasOutcomeAchievement {
+  id          String @id @default(uuid()) @db.Uuid
+  portfolioId String @db.Uuid
+  outcomeNo   Int    // 1..7
+  experienceId String? @db.Uuid
+  achievedAt  DateTime?
+  portfolio   CasPortfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  @@unique([portfolioId, outcomeNo])
+}
+
+model CasInterview {
+  id          String @id @default(uuid()) @db.Uuid
+  portfolioId String @db.Uuid
+  index       Int    // 1..3
+  heldAt      DateTime?
+  notes       Json?
+  lockedAt    DateTime?
+  portfolio   CasPortfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+}
+
+/// [R3] Трекер IA/EA (IB eCoursework): компонент предмета и прогресс студента.
+model AssessmentComponent {
+  id         String  @id @default(uuid()) @db.Uuid
+  subjectId  String  @db.Uuid
+  name       String  // Individual oral, HL Essay, Scientific investigation…
+  kind       AssessmentComponentKind
+  subject    Subject @relation(fields: [subjectId], references: [id])
+  progress   StudentComponentProgress[]
+}
+
+model StudentComponentProgress {
+  componentId String  @db.Uuid
+  studentId   String  @db.Uuid
+  status      ProjectStatus @default(NOT_STARTED)
+  note        String?
+  component   AssessmentComponent @relation(fields: [componentId], references: [id], onDelete: Cascade)
+  student     StudentProfile      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([componentId, studentId])
+}
+
+/// [R3] Регистрация кандидатов IBIS (выбор кандидатов + импорт данных).
+model IbisRegistration {
+  id           String @id @default(uuid()) @db.Uuid
+  yearGroupId  String @db.Uuid
+  studentId    String @db.Uuid
+  category     String // Diploma | Course
+  session      String? // May 2028
+  data         Json?
+
+  @@unique([yearGroupId, studentId])
+}
+
+// ============================ 12. ОТЧЁТЫ =====================================
+
+/// [R2] Шаблоны отчётов (секции, layout) и комментарии-банк.
+model ReportTemplate {
+  id        String     @id @default(uuid()) @db.Uuid
+  schoolId  String     @db.Uuid
+  kind      ReportKind
+  name      Json
+  layout    Json       // секции: оценки по предметам, ATL, комментарии, динамика…
+  progressReports ProgressReport[]
+}
+
+model CommentBankItem {
+  id        String  @id @default(uuid()) @db.Uuid
+  schoolId  String  @db.Uuid
+  category  String?
+  text      Json
+}
+
+/// [R2] Сформированный отчёт студента (PDF), в т.ч. сводная успеваемость по всем предметам.
+model ProgressReport {
+  id          String     @id @default(uuid()) @db.Uuid
+  templateId  String     @db.Uuid
+  studentId   String     @db.Uuid
+  periodId    String?    @db.Uuid
+  kind        ReportKind
+  data        Json       // снимок оценок на момент генерации
+  comments    Json?
+  fileId      String?    @db.Uuid
+  published   Boolean    @default(false)
+  generatedAt DateTime   @default(now())
+  template    ReportTemplate @relation(fields: [templateId], references: [id])
+  student     StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  period      GradingPeriod? @relation(fields: [periodId], references: [id])
+
+  @@index([studentId, kind])
+}
+
+// ============================ 13. АНАЛИТИКА (КОНФИГ) =========================
+
+/// [R3] Пороги «в зоне риска» (IBMYP total<27, IB grade<4, DP total<24 …).
+model PerformanceThreshold {
+  id          String  @id @default(uuid()) @db.Uuid
+  programmeId String  @db.Uuid
+  metric      String  // IB_TOTAL | IB_GRADE | CRITERION_LEVEL | SCORE_PCT
+  value       Decimal @db.Decimal(6, 2)
+
+  @@unique([programmeId, metric])
+}
+
+// ============================ 14. ИНТЕГРАЦИИ, МИГРАЦИЯ, ИИ ===================
+
+/// [R1/R2] Соответствие наших сущностей внешним ID (Toddle, EduPage, aSc).
+model ExternalRef {
+  id         String         @id @default(uuid()) @db.Uuid
+  schoolId   String         @db.Uuid
+  source     ExternalSource
+  entityType String         // 'Course','Student','Unit','Assignment',...
+  entityId   String         @db.Uuid
+  externalId String
+  meta       Json?
+
+  @@unique([source, entityType, externalId])
+  @@index([entityType, entityId])
+}
+
+/// [R2] Миграция из Toddle и выгрузки в EduPage: задания/пакеты/ошибки.
+model SyncJob {
+  id          String         @id @default(uuid()) @db.Uuid
+  schoolId    String         @db.Uuid
+  source      ExternalSource
+  direction   String         // IMPORT | EXPORT
+  kind        String         // 'timetable','students','grades_final','toddle_units',…
+  status      JobStatus      @default(PENDING)
+  payloadFileId String?      @db.Uuid
+  stats       Json?
+  errors      Json?
+  createdById String?        @db.Uuid
+  createdAt   DateTime       @default(now())
+  finishedAt  DateTime?
+}
+
+/// [R3] ИИ-помощники: журнал вызовов (аудит, лимиты, приватность).
+model AiGeneration {
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @db.Uuid
+  userId      String   @db.Uuid
+  purpose     String   // 'rubric','assignment','report_comment','unit_draft'
+  model       String
+  promptHash  String?
+  inputTokens Int?
+  outputTokens Int?
+  accepted    Boolean?
+  createdAt   DateTime @default(now())
+
+  @@index([schoolId, userId, createdAt])
+}
+
+// ============================ 15. СЛУЖЕБНОЕ ==================================
+
+/// [R1] Минимальный аудит (владелец: журнал изменений оценок не нужен; оставляем
+/// только критичные события: override итоговых оценок, роли, импорт/экспорт).
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  schoolId   String   @db.Uuid
+  actorId    String?  @db.Uuid
+  action     String
+  entityType String
+  entityId   String?
+  meta       Json?
+  createdAt  DateTime @default(now())
+
+  @@index([schoolId, entityType, createdAt])
+}
