@@ -15,7 +15,9 @@
 // =============================================================================
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // native — для разработки; debian-openssl-3.0.x — для Docker-образа (distroless/Debian 12)
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
@@ -343,6 +345,12 @@ model User {
   signInCodeHash String?
   uid          String?    // читаемый идентификатор вида TD-XXXXXXXX → у нас SCH-XXXXXXXX
   lastActiveAt DateTime?
+  /// Пароль (argon2id). Только для входа без Google; задаётся по ссылке-приглашению.
+  passwordHash      String?
+  passwordChangedAt DateTime?
+  /// Защита от перебора: счётчик неудачных попыток и временная блокировка
+  failedLogins Int        @default(0)
+  lockedUntil  DateTime?
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
   deletedAt    DateTime?
@@ -355,6 +363,7 @@ model User {
   roles          RoleAssignment[]
   authAccounts   AuthAccount[]
   sessions       AuthSession[]
+  loginTokens    LoginToken[]
   notifications  Notification[]       @relation("NotificationRecipient")
   notificationPrefs NotificationPreference[]
   messagesSent   Message[]
@@ -383,9 +392,31 @@ model AuthAccount {
 model AuthSession {
   id           String   @id @default(uuid()) @db.Uuid
   userId       String   @db.Uuid
+  /// SHA-256 от токена из cookie (сам токен в БД не хранится)
   sessionToken String   @unique
   expires      DateTime
+  createdAt    DateTime @default(now())
+  lastSeenAt   DateTime @default(now())
+  ip           String?
+  userAgent    String?
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// [R1] Одноразовые ссылки: приглашение (установка пароля) и сброс пароля. Хранится только SHA-256 токена.
+model LoginToken {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @db.Uuid
+  tokenHash   String    @unique
+  purpose     String    // INVITE | RESET
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdById String?   @db.Uuid
+  createdAt   DateTime  @default(now())
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 /// [R1] Роль пользователя с областью действия (Programme-scoped RBAC).
@@ -1189,6 +1220,7 @@ model Assignment {
 
   @@index([courseId, dueAt])
   @@index([periodId, categoryId])
+  @@index([dueAt])
 }
 
 /// Какие критерии оцениваются и максимум по ним.
@@ -1338,6 +1370,7 @@ model PeriodGrade {
 
   @@unique([courseId, studentId, periodId])
   @@index([studentId, periodId])
+  @@index([periodId])
 }
 
 /// [R1] Итоговый уровень критерия за период (агрегация суммативных).

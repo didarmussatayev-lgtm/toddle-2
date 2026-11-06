@@ -7,6 +7,7 @@ import { canAdmin, hasRole } from "@/lib/access";
 import { logout } from "@/app/actions/session";
 import { LocaleSwitch } from "@/components/LocaleSwitch";
 import type { DictKey } from "@/lib/i18n-dict";
+import { config } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
 
@@ -57,7 +58,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </div>
         </div>
       </header>
-      <div className="bg-amber-50 py-1 text-center text-xs text-amber-800">{t("demoBanner")}</div>
+      {config.demoMode && <div className="bg-amber-50 py-1 text-center text-xs text-amber-800">{t("demoBanner")}</div>}
       <main className="mx-auto max-w-7xl px-4 py-6">{children}</main>
     </div>
   );

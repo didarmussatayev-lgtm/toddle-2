@@ -5,12 +5,14 @@ import { requireUser, fullName } from "@/lib/auth";
 import { canEditGrades, canManageCourse, isCoordinatorOf, isSchoolAdmin } from "@/lib/access";
 import { recalcCourse, fiveFor } from "@/lib/grading/service";
 import type { SubmissionStatus } from "@prisma/client";
+import { clip, isUuid } from "@/lib/validate";
 
 const SUB_STATUSES: SubmissionStatus[] = ["NOT_SUBMITTED", "SUBMITTED", "LATE", "RETURNED", "MISSED_VALID", "MISSED_INVALID"];
 
 export async function saveEvaluations(formData: FormData) {
   const user = await requireUser();
   const assignmentId = String(formData.get("assignmentId"));
+  if (!isUuid(assignmentId)) throw new Error("bad id");
   const publish = formData.get("publish") != null;
   const a = await db.assignment.findUniqueOrThrow({
     where: { id: assignmentId },
@@ -43,7 +45,7 @@ export async function saveEvaluations(formData: FormData) {
       score = Number(scoreRaw.replace(",", "."));
       if (!Number.isFinite(score) || score < 0 || score > Number(a.maxScore)) throw new Error(`Балл должен быть 0–${a.maxScore}`);
     }
-    const comment = String(formData.get(`comment_${sid}`) ?? "").trim();
+    const comment = clip(formData.get(`comment_${sid}`), 2000);
     const hasData = levels.some((l) => l.level != null) || score != null;
     const existing = await db.evaluation.findUnique({ where: { assignmentId_studentId: { assignmentId, studentId: sid } } });
     if (!hasData && !existing && !comment) continue;
@@ -83,15 +85,17 @@ async function notifyFamilies(studentIds: string[], trigger: string, title: stri
 export async function recalcAction(formData: FormData) {
   const user = await requireUser();
   const courseId = String(formData.get("courseId"));
-  if (!(await canManageCourse(user, courseId))) throw new Error("forbidden");
+  if (!isUuid(courseId) || !(await canManageCourse(user, courseId))) throw new Error("forbidden");
   await recalcCourse(db, courseId);
-  redirect(`/courses/${courseId}?period=${formData.get("period") ?? ""}&recalc=1`);
+  const period = String(formData.get("period") ?? "").replace(/[^A-Z0-9]/g, "").slice(0, 4);
+  redirect(`/courses/${courseId}?period=${period}&recalc=1`);
 }
 
 export async function publishPeriod(formData: FormData) {
   const user = await requireUser();
   const courseId = String(formData.get("courseId"));
   const periodId = String(formData.get("periodId"));
+  if (!isUuid(courseId) || !isUuid(periodId)) throw new Error("bad id");
   const publish = String(formData.get("publish")) === "1";
   if (!(await canEditGrades(user, courseId, periodId))) throw new Error("forbidden");
   const course = await db.course.findUniqueOrThrow({ where: { id: courseId } });
@@ -108,10 +112,11 @@ export async function publishPeriod(formData: FormData) {
 export async function overrideGrade(formData: FormData) {
   const user = await requireUser();
   const pgId = String(formData.get("periodGradeId"));
+  if (!isUuid(pgId)) throw new Error("bad id");
   const clear = formData.get("clear") != null;
   const pg = await db.periodGrade.findUniqueOrThrow({ where: { id: pgId }, include: { course: true, period: true, student: { include: { user: true } } } });
   if (!(await canEditGrades(user, pg.courseId, pg.periodId))) throw new Error("forbidden");
-  const reason = String(formData.get("reason") ?? "").trim();
+  const reason = clip(formData.get("reason"), 500);
   let g7: number | null = null;
   if (!clear) {
     g7 = Number(formData.get("grade7"));
@@ -136,6 +141,7 @@ export async function overrideGrade(formData: FormData) {
 export async function toggleLock(formData: FormData) {
   const user = await requireUser();
   const periodId = String(formData.get("periodId"));
+  if (!isUuid(periodId)) throw new Error("bad id");
   const p = await db.gradingPeriod.findUniqueOrThrow({ where: { id: periodId }, include: { programme: true } });
   if (!(isSchoolAdmin(user) || isCoordinatorOf(user, p.programmeId))) throw new Error("forbidden");
   await db.gradingPeriod.update({ where: { id: periodId }, data: { locked: !p.locked } });

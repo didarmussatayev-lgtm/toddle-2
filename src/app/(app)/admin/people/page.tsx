@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { getT } from "@/lib/i18n";
 import { db } from "@/lib/db";
-import { canAdmin } from "@/lib/access";
+import { canAdmin, isSchoolAdmin } from "@/lib/access";
 import { PageTitle, Card, Notice, Tabs, Badge } from "@/components/ui";
 import type { DictKey } from "@/lib/i18n-dict";
 
@@ -14,6 +14,14 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
   const tab = sp.tab === "staff" || sp.tab === "parents" ? sp.tab : "students";
   const q = (sp.q ?? "").trim();
   const nameFilter = q ? { OR: [{ lastName: { contains: q, mode: "insensitive" as const } }, { firstName: { contains: q, mode: "insensitive" as const } }, { email: { contains: q, mode: "insensitive" as const } }] } : {};
+
+  const admin = isSchoolAdmin(user);
+  const Access = ({ userId, status }: { userId: string; status: string }) =>
+    admin ? (
+      <Link href={`/admin/people/${userId}`} className="btn btn-sm whitespace-nowrap">
+        {status === "DISABLED" ? "⛔ " : status === "INVITED" ? "✉ " : ""}Доступ
+      </Link>
+    ) : null;
 
   const tabs = Tabs({ items: [
     { href: "/admin/people?tab=students", label: t("students"), active: tab === "students" },
@@ -30,7 +38,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
     });
     body = (
       <table className="tbl">
-        <thead><tr><th>{t("student")}</th><th>ID</th><th>{t("homeroom")}</th><th>Email</th><th>{t("role_GUARDIAN")}</th></tr></thead>
+        <thead><tr><th>{t("student")}</th><th>ID</th><th>{t("homeroom")}</th><th>Email</th><th>{t("role_GUARDIAN")}</th><th></th></tr></thead>
         <tbody>{list.map((s) => (
           <tr key={s.id}>
             <td><Link className="link" href={`/students/${s.id}`}>{s.user.lastName} {s.user.firstName}</Link></td>
@@ -38,6 +46,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
             <td>{s.groupMembers.map((g) => g.group.name).join(", ")}</td>
             <td className="text-xs text-slate-500">{s.user.email}</td>
             <td className="text-xs">{s.guardians.map((g) => `${g.guardian.user.lastName} ${g.guardian.user.firstName}${g.approved ? "" : " (?)"}`).join(", ")}</td>
+            <td><Access userId={s.userId} status={s.user.status} /></td>
           </tr>
         ))}</tbody>
       </table>
@@ -46,13 +55,14 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
     const list = await db.staffProfile.findMany({ where: { user: nameFilter }, include: { user: { include: { roles: { include: { programme: true } } } }, courseStaff: { include: { course: true } } }, orderBy: { user: { lastName: "asc" } } });
     body = (
       <table className="tbl">
-        <thead><tr><th>{t("teacher")}</th><th>{t("status")}</th><th>{t("courses")}</th><th>Email</th></tr></thead>
+        <thead><tr><th>{t("teacher")}</th><th>{t("status")}</th><th>{t("courses")}</th><th>Email</th><th></th></tr></thead>
         <tbody>{list.map((s) => (
           <tr key={s.id}>
             <td><div className="font-medium">{s.user.lastName} {s.user.firstName}</div><div className="text-xs text-slate-500">{s.displayTitle}</div></td>
             <td><div className="flex flex-wrap gap-1">{s.user.roles.map((r) => <Badge key={r.id} tone={r.role === "TEACHER" ? "slate" : "blue"}>{t(`role_${r.role}` as DictKey)}{r.programme ? ` ${r.programme.code}` : ""}</Badge>)}</div></td>
             <td className="text-xs">{s.courseStaff.map((c) => c.course.name).join(", ")}</td>
             <td className="text-xs text-slate-500">{s.user.email}</td>
+            <td><Access userId={s.userId} status={s.user.status} /></td>
           </tr>
         ))}</tbody>
       </table>
@@ -61,13 +71,14 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
     const list = await db.guardianProfile.findMany({ where: { user: nameFilter }, include: { user: true, students: { include: { student: { include: { user: true, groupMembers: { include: { group: true } } } } } } }, orderBy: { user: { lastName: "asc" } } });
     body = (
       <table className="tbl">
-        <thead><tr><th>{t("role_GUARDIAN")}</th><th>{t("child")}</th><th>Email</th><th>Тел.</th></tr></thead>
+        <thead><tr><th>{t("role_GUARDIAN")}</th><th>{t("child")}</th><th>Email</th><th>Тел.</th><th></th></tr></thead>
         <tbody>{list.map((g) => (
           <tr key={g.id}>
             <td className="font-medium">{g.user.lastName} {g.user.firstName}</td>
             <td className="text-sm">{g.students.map((s) => `${s.student.user.firstName} (${s.student.groupMembers[0]?.group.name ?? ""}, ${s.relation ?? ""})`).join("; ")}</td>
             <td className="text-xs text-slate-500">{g.user.email}</td>
             <td className="text-xs text-slate-500">{g.phone}</td>
+            <td><Access userId={g.userId} status={g.user.status} /></td>
           </tr>
         ))}</tbody>
       </table>

@@ -1,3 +1,4 @@
+import { uuidOr404 } from "@/lib/validate";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { getT } from "@/lib/i18n";
@@ -8,7 +9,9 @@ import { PageTitle, Card, Notice } from "@/components/ui";
 import { saveAttendance } from "@/app/actions/attendance";
 
 export default async function AttendancePage({ params, searchParams }: { params: Promise<{ entryId: string; date: string }>; searchParams: Promise<{ saved?: string }> }) {
-  const { entryId, date } = await params;
+  const p = await params;
+  const entryId = uuidOr404(p.entryId);
+  const date = p.date;
   const sp = await searchParams;
   if (!isIso(date)) notFound();
   const user = await requireUser();

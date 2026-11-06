@@ -1,18 +1,17 @@
-import { cookies } from "next/headers";
+import { cache } from "react";
 import { redirect } from "next/navigation";
 import { db } from "./db";
+import { getSessionUserId } from "./session";
 
 /**
- * ДЕМО-аутентификация: id пользователя в httpOnly-cookie.
- * В рабочей версии заменяется на Auth.js + Google Workspace (модели AuthAccount/AuthSession уже в схеме).
+ * Текущий пользователь по серверной сессии (таблица AuthSession, в cookie — случайный токен).
+ * Вход: Google (src/app/auth/google), пароль по приглашению или демо-вход (только DEMO_MODE=true).
  */
-export const SESSION_COOKIE = "demo_uid";
-
-export async function getCurrentUser() {
-  const uid = (await cookies()).get(SESSION_COOKIE)?.value;
+export const getCurrentUser = cache(async () => {
+  const uid = await getSessionUserId();
   if (!uid) return null;
   return loadUser(uid);
-}
+});
 
 export async function loadUser(uid: string) {
   const user = await db.user.findFirst({

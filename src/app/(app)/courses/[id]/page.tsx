@@ -1,3 +1,4 @@
+import { uuidOr404 } from "@/lib/validate";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
@@ -9,7 +10,7 @@ import { recalcAction, publishPeriod } from "@/app/actions/grading";
 import { fmtDate } from "@/lib/dates";
 
 export default async function GradebookPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ period?: string; recalc?: string }> }) {
-  const { id } = await params;
+  const id = uuidOr404((await params).id);
   const sp = await searchParams;
   const user = await requireUser();
   const { t, tj, locale } = await getT();

@@ -1,0 +1,11 @@
+role;last_name;first_name;email;class;child_email;title;student_id;phone;relation
+admin;Сапарова;Гульнара;admin@school.kz;;;Администратор системы;;;
+coordinator_myp;Мусина;Айжан;myp@school.kz;;;Координатор MYP;;;
+coordinator_dp;Коллинз;Ричард;dp@school.kz;;;Координатор DP;;;
+deputy;Ким;Ольга;deputy@school.kz;;;Завуч;;;
+advisor;Жанибекова;Сауле;zhanibekova@school.kz;7A;;Учитель русского языка;;;
+teacher;Бекмуханов;Ерлан;bekmukhanov@school.kz;;;Учитель математики;;;
+student;Ахметова;Асель;a.akhmetova@school.kz;7A;;;ST-0001;;
+student;Ахметова;Анель;an.akhmetova@school.kz;8A;;;ST-0002;;
+student;Ким;Тимур;t.kim@school.kz;DP1;;;ST-0003;;
+parent;Ахметова;Динара;dinara.akhmetova@gmail.com;;a.akhmetova@school.kz|an.akhmetova@school.kz;;;+7 701 000 0000;мать

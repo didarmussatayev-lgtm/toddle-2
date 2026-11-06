@@ -11,13 +11,13 @@ export default async function CoursesPage() {
   const { t, tj } = await getT();
   const scopeProgrammes = user.roles.filter((r) => r.role === "COORDINATOR" || r.role === "DEPUTY_HEAD").map((r) => r.programmeId);
   const allProgrammes = isSchoolAdmin(user) || scopeProgrammes.includes(null);
+  // Админ и сотрудники без ограничения программой видят все курсы; остальные — свои и своей программы
   const or: Prisma.CourseWhereInput[] = [];
   if (user.staffProfile) or.push({ staff: { some: { staffId: user.staffProfile.id } } });
-  if (allProgrammes) or.push({});
-  else if (scopeProgrammes.length) or.push({ programmeId: { in: scopeProgrammes.filter(Boolean) as string[] } });
-  const courses = or.length
+  if (scopeProgrammes.length) or.push({ programmeId: { in: scopeProgrammes.filter(Boolean) as string[] } });
+  const courses = allProgrammes || or.length
     ? await db.course.findMany({
-        where: { deletedAt: null, archived: false, OR: or },
+        where: { deletedAt: null, archived: false, ...(allProgrammes ? {} : { OR: or }) },
         include: { subject: true, programme: true, groups: { include: { group: true } }, staff: { include: { staff: { include: { user: true } } } }, _count: { select: { enrollments: true, assignments: true } } },
         orderBy: [{ programme: { code: "desc" } }, { name: "asc" }],
       })

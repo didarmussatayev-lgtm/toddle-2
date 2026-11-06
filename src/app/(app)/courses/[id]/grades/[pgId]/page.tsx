@@ -1,3 +1,4 @@
+import { uuidOr404 } from "@/lib/validate";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { getT } from "@/lib/i18n";
@@ -8,7 +9,9 @@ import { overrideGrade } from "@/app/actions/grading";
 import { fmtDateTime } from "@/lib/dates";
 
 export default async function OverridePage({ params }: { params: Promise<{ id: string; pgId: string }> }) {
-  const { id, pgId } = await params;
+  const p = await params;
+  const id = uuidOr404(p.id);
+  const pgId = uuidOr404(p.pgId);
   const user = await requireUser();
   const { t, tj, locale } = await getT();
   const pg = await db.periodGrade.findUnique({ where: { id: pgId }, include: { period: true, course: true, student: { include: { user: true } }, criterionGrades: { include: { criterion: true } } } });

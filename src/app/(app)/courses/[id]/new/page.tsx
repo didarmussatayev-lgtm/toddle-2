@@ -1,3 +1,4 @@
+import { uuidOr404 } from "@/lib/validate";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { getT } from "@/lib/i18n";
@@ -8,7 +9,7 @@ import { createAssignment } from "@/app/actions/assignments";
 import { todayIso, addDays } from "@/lib/dates";
 
 export default async function NewAssignmentPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ period?: string }> }) {
-  const { id } = await params;
+  const id = uuidOr404((await params).id);
   const sp = await searchParams;
   const user = await requireUser();
   const { t, tj } = await getT();
