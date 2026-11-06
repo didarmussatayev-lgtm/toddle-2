@@ -13,7 +13,7 @@ export default async function AuditPage() {
   const actors = new Map((await db.user.findMany({ where: { id: { in: logs.map((l) => l.actorId!).filter(Boolean) } } })).map((u) => [u.id, u]));
   return (
     <>
-      <PageTitle title={t("auditLog")} subtitle="AuditLog: override итоговых оценок, блокировка и публикация периодов" />
+      <PageTitle title={t("auditLog")} subtitle="Входы и доступ, изменения итоговых оценок, публикация и блокировка периодов, импорт и экспорт" />
       <Card>
         <table className="tbl">
           <thead><tr><th>{t("when")}</th><th>{t("who")}</th><th>{t("action")}</th><th>Детали</th></tr></thead>

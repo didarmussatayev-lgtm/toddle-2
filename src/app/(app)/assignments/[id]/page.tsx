@@ -1,3 +1,4 @@
+import { uuidOr404 } from "@/lib/validate";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
@@ -12,7 +13,7 @@ import { summativeLoad } from "@/lib/workload";
 const SUBS = ["SUBMITTED", "LATE", "NOT_SUBMITTED", "MISSED_VALID", "MISSED_INVALID"] as const;
 
 export default async function AssignmentPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ saved?: string; created?: string }> }) {
-  const { id } = await params;
+  const id = uuidOr404((await params).id);
   const sp = await searchParams;
   const user = await requireUser();
   const { t, tj, locale } = await getT();

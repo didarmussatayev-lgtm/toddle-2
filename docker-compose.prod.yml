@@ -1,0 +1,91 @@
+# Рабочий стенд: сайт + PostgreSQL + HTTPS (Caddy) + ежедневные бэкапы.
+# Запуск и обновление — см. docs/DEPLOY.md. Секреты — только в файле .env.production (не в git).
+name: ib-journal
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-journal}
+      POSTGRES_USER: ${POSTGRES_USER:-journal}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env.production}
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [backend]          # порт базы наружу НЕ публикуется
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      retries: 10
+    security_opt: ["no-new-privileges:true"]
+
+  app:
+    build: { context: ., target: runner }
+    image: ib-journal-app
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-journal}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-journal}?connection_limit=10
+      NODE_ENV: production
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [backend, frontend]
+    read_only: true
+    tmpfs: ["/tmp", "/app/.next/cache"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      DOMAIN: ${DOMAIN:?задайте DOMAIN в .env.production}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [app]
+    networks: [frontend]
+    security_opt: ["no-new-privileges:true"]
+
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER:-journal}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-journal}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+    volumes:
+      - ./deploy/backup.sh:/backup.sh:ro
+      - ${BACKUP_DIR:-./backups}:/backups
+    entrypoint: ["/bin/sh", "/backup.sh"]
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [backend]
+    security_opt: ["no-new-privileges:true"]
+
+  # Служебные команды (миграции, настройка школы): docker compose -f docker-compose.prod.yml --profile tools run --rm tools [команда]
+  tools:
+    build: { context: ., target: tools }
+    image: ib-journal-tools
+    profiles: ["tools"]
+    env_file: .env.production
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-journal}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-journal}
+      NODE_ENV: production
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [backend]
+
+networks:
+  backend: { internal: true }    # без выхода в интернет: БД доступна только приложению, бэкапу и tools
+  frontend: {}
+
+volumes:
+  pgdata: {}
+  caddy_data: {}
+  caddy_config: {}

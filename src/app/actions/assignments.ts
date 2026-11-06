@@ -4,13 +4,14 @@ import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { canEditGrades, canManageCourse } from "@/lib/access";
 import { isIso } from "@/lib/dates";
+import { clip, isUuid } from "@/lib/validate";
 
 export async function createAssignment(formData: FormData) {
   const user = await requireUser();
   const courseId = String(formData.get("courseId"));
-  if (!(await canManageCourse(user, courseId))) throw new Error("forbidden");
+  if (!isUuid(courseId) || !(await canManageCourse(user, courseId))) throw new Error("forbidden");
   const course = await db.course.findUniqueOrThrow({ where: { id: courseId }, include: { groups: true, subject: { include: { criteria: true } } } });
-  const title = String(formData.get("title") ?? "").trim();
+  const title = clip(formData.get("title"), 200);
   const type = String(formData.get("type")) === "FORMATIVE" ? "FORMATIVE" : "SUMMATIVE";
   const due = String(formData.get("due") ?? "");
   const periodId = String(formData.get("periodId") ?? "");
@@ -29,7 +30,7 @@ export async function createAssignment(formData: FormData) {
       courseId, title, type, periodId: period.id, categoryId: category?.id, status: "PUBLISHED", publishAt: new Date(),
       dueAt: new Date(`${due}T13:00:00.000Z`), maxScore, createdById: user.id, isSummativeDate: type === "SUMMATIVE",
       hideTotalFromStudents: isMyp && type === "SUMMATIVE",
-      instructions: { ru: String(formData.get("instructions") ?? "") },
+      instructions: { ru: clip(formData.get("instructions"), 5000) },
       criteria: { create: critIds.map((criterionId) => ({ criterionId, maxLevel: 8 })) },
       targets: { create: course.groups.map((g) => ({ groupId: g.groupId })) },
     },

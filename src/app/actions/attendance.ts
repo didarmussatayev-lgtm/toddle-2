@@ -4,15 +4,20 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { canManageCourse } from "@/lib/access";
-import { isIso, isoToDate } from "@/lib/dates";
+import { isIso, isoToDate, todayIso } from "@/lib/dates";
+import { clip, isUuid } from "@/lib/validate";
 
 export async function saveAttendance(formData: FormData) {
   const user = await requireUser();
   const entryId = String(formData.get("entryId"));
   const date = String(formData.get("date"));
-  if (!isIso(date)) throw new Error("bad date");
+  if (!isIso(date) || !isUuid(entryId)) throw new Error("bad input");
   const entry = await db.timetableEntry.findUniqueOrThrow({ where: { id: entryId }, include: { course: { include: { enrollments: { where: { status: "ACTIVE" } } } } } });
   if (!(await canManageCourse(user, entry.courseId))) throw new Error("forbidden");
+  // урок должен действительно быть в этот день по расписанию, и не в будущем
+  const day = await db.scheduleDay.findFirst({ where: { date: isoToDate(date), isNonWorking: false } });
+  if (!day || day.dayIndex !== entry.dayIndex || isoToDate(date) < entry.validFrom || isoToDate(date) > entry.validTo) throw new Error("no such lesson");
+  if (date > todayIso()) throw new Error("future date");
 
   const allPresent = formData.get("allPresent") != null;
   const codes = await db.attendanceCode.findMany({ where: { active: true } });
@@ -27,7 +32,7 @@ export async function saveAttendance(formData: FormData) {
   for (const e of entry.course.enrollments) {
     const raw = String(formData.get(`code_${e.studentId}`) ?? present.id);
     const codeId = allPresent ? present.id : codes.some((c) => c.id === raw) ? raw : present.id;
-    const note = allPresent ? null : (String(formData.get(`note_${e.studentId}`) ?? "").trim() || null);
+    const note = allPresent ? null : clip(formData.get(`note_${e.studentId}`), 500) || null;
     const prev = await db.attendanceRecord.findUnique({ where: { sessionId_studentId: { sessionId: session.id, studentId: e.studentId } } });
     await db.attendanceRecord.upsert({
       where: { sessionId_studentId: { sessionId: session.id, studentId: e.studentId } },

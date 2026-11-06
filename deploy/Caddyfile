@@ -1,0 +1,16 @@
+# Автоматический HTTPS (Let's Encrypt) для домена из переменной DOMAIN.
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy app:3000 {
+		# Приложение доверяет только этому заголовку для IP клиента (журнал входов, ограничение попыток)
+		header_up X-Real-IP {remote_host}
+	}
+	header -Server
+	request_body {
+		max_size 10MB
+	}
+	log {
+		output stdout
+		format console
+	}
+}

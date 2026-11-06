@@ -1,6 +1,7 @@
 /* Демо-данные школы. Все люди вымышленные. Запуск: npm run db:reset */
 import { PrismaClient, Prisma } from "@prisma/client";
-import { MYP_BOUNDARIES, PERCENT_BANDS, FIVE_SCALE, CATEGORY_WEIGHTS } from "../src/lib/grading/defaults";
+import { createSchoolBase } from "./base";
+import { createSubjectCatalog, MYP_SUBJECTS, DP_SUBJECTS } from "./catalog";
 import { recalcCourse } from "../src/lib/grading/service";
 
 const db = new PrismaClient();
@@ -26,100 +27,26 @@ const lastNames = ["Ахметов", "Серикбаев", "Жумабеков",
 const fem = (ln: string) => (ln.endsWith("ов") || ln.endsWith("ев") || ln.endsWith("ин") ? ln + "а" : ln);
 
 async function main() {
+  // Защита: демо-заполнение стирает ВСЮ базу. Не запускать на базе с реальной школой.
+  const real = await db.school.findFirst({ where: { NOT: { code: "DEMO" } } }).catch(() => null);
+  if (real && !process.argv.includes("--force")) {
+    console.error(`Отказ: в базе есть рабочая школа (${real.code}). Демо-заполнение удалит все данные. Если это действительно нужно — добавьте --force.`);
+    process.exit(1);
+  }
+  if (process.env.NODE_ENV === "production" && process.env.ALLOW_DEMO_SEED !== "true") {
+    console.error("Отказ: NODE_ENV=production. Для демо-стенда задайте ALLOW_DEMO_SEED=true.");
+    process.exit(1);
+  }
   console.log("Очистка…");
   const tables = await db.$queryRaw<{ tablename: string }[]>`SELECT tablename FROM pg_tables WHERE schemaname='public'`;
   await db.$executeRawUnsafe(`TRUNCATE ${tables.map((t) => `"${t.tablename}"`).join(",")} CASCADE`);
 
-  // ---------- школа, программы, год ----------
-  const school = await db.school.create({ data: { name: I("Лицей «Демо»", "Demo Lyceum", "«Демо» лицейі"), code: "DEMO", timezone: "Asia/Almaty" } });
-  const myp = await db.programme.create({ data: { schoolId: school.id, code: "MYP", name: I("Программа средних классов (MYP)", "Middle Years Programme", "Орта жылдар бағдарламасы (MYP)") } });
-  const dp = await db.programme.create({ data: { schoolId: school.id, code: "DP", name: I("Дипломная программа (DP)", "Diploma Programme", "Дипломдық бағдарлама (DP)") } });
-  const year = await db.academicYear.create({ data: { schoolId: school.id, name: "2026-27", startDate: D("2026-09-01"), endDate: D("2027-05-25"), isCurrent: true } });
-
-  for (const m of ["messaging", "portfolio", "insights", "ai"]) {
-    await db.schoolModuleToggle.create({ data: { schoolId: school.id, moduleKey: m, enabled: m === "messaging" } });
-  }
-
-  // ---------- периоды ----------
-  const periodDefs = [
-    { abbreviation: "T1", name: "Term 1", kind: "REPORTING", start: "2026-09-01", end: "2026-10-24", sortOrder: 1 },
-    { abbreviation: "T2", name: "Term 2", kind: "REPORTING", start: "2026-11-02", end: "2026-12-26", sortOrder: 2 },
-    { abbreviation: "S1", name: "Semester 1", kind: "CUMULATIVE", start: "2026-09-01", end: "2026-12-26", sortOrder: 3 },
-    { abbreviation: "T3", name: "Term 3", kind: "REPORTING", start: "2027-01-11", end: "2027-03-19", sortOrder: 4 },
-    { abbreviation: "T4", name: "Term 4", kind: "REPORTING", start: "2027-03-30", end: "2027-05-25", sortOrder: 5 },
-    { abbreviation: "S2", name: "Semester 2", kind: "CUMULATIVE", start: "2027-01-11", end: "2027-05-25", sortOrder: 6 },
-    { abbreviation: "FY", name: "Final", kind: "CUMULATIVE", start: "2026-09-01", end: "2027-05-25", sortOrder: 7 },
-  ] as const;
-  const periods: Record<string, Record<string, string>> = { MYP: {}, DP: {} };
-  const formative = await db.gradingCategory.create({ data: { schoolId: school.id, code: "FORMATIVE", name: I("Формативное", "Formative", "Қалыптастырушы") } });
-  const summative = await db.gradingCategory.create({ data: { schoolId: school.id, code: "SUMMATIVE", name: I("Суммативное", "Summative", "Жиынтық") } });
-
-  for (const prog of [myp, dp]) {
-    for (const p of periodDefs) {
-      const gp = await db.gradingPeriod.create({
-        data: { academicYearId: year.id, programmeId: prog.id, name: p.name, abbreviation: p.abbreviation, kind: p.kind, startDate: D(p.start), endDate: D(p.end), sortOrder: p.sortOrder },
-      });
-      periods[prog.code][p.abbreviation] = gp.id;
-      if (p.kind === "REPORTING") {
-        await db.categoryWeight.create({ data: { categoryId: formative.id, periodId: gp.id, weight: CATEGORY_WEIGHTS.FORMATIVE } });
-        await db.categoryWeight.create({ data: { categoryId: summative.id, periodId: gp.id, weight: CATEGORY_WEIGHTS.SUMMATIVE } });
-      }
-    }
-    const P = periods[prog.code];
-    const contrib = [["S1", "T1", 1], ["S1", "T2", 1], ["S2", "T3", 1], ["S2", "T4", 1], ["FY", "S1", 0.5], ["FY", "S2", 0.5]] as const;
-    for (const [parent, child, weight] of contrib) {
-      await db.periodContribution.create({ data: { parentId: P[parent], childId: P[child], weight } });
-    }
-
-    // ---------- политика оценивания ----------
-    const policy = await db.gradingPolicy.create({
-      data: {
-        programmeId: prog.id, academicYearId: year.id,
-        useCriteriaMethod: prog.code === "MYP", usePercentMethod: true,
-        examWeight: prog.code === "MYP" ? 0.5 : null, validFrom: D("2026-09-01"),
-      },
-    });
-    for (const [count, list] of Object.entries(MYP_BOUNDARIES)) {
-      await db.gradeBoundarySet.create({ data: { policyId: policy.id, criteriaCount: Number(count), boundaries: { create: list } } });
-    }
-    for (const b of PERCENT_BANDS) await db.percentGradeBand.create({ data: { policyId: policy.id, ...b } });
-
-    const ib = await db.gradeScale.create({
-      data: {
-        programmeId: prog.id, code: "IB_1_7", name: I("IB 1–7", "IB 1–7"), minValue: 1, maxValue: 7,
-        entries: { create: [1, 2, 3, 4, 5, 6, 7].map((g) => ({ label: String(g), numericValue: g, sortOrder: g })) },
-      },
-    });
-    await db.gradeScale.create({
-      data: {
-        programmeId: prog.id, code: "FIVE", name: I("5-балльная шкала", "5-point scale", "5 балдық шкала"), type: "DEPENDENT", sourceScaleId: ib.id, minValue: 2, maxValue: 5,
-        entries: { create: FIVE_SCALE.map((e, i) => ({ label: e.label, numericValue: e.value, sourceValues: e.sourceValues, sortOrder: i })) },
-      },
-    });
-    await db.performanceThreshold.create({ data: { programmeId: prog.id, metric: "IB_GRADE", value: 4 } });
-    if (prog.code === "DP") {
-      await db.performanceThreshold.create({ data: { programmeId: prog.id, metric: "IB_TOTAL", value: 24 } });
-      await db.performanceThreshold.create({ data: { programmeId: prog.id, metric: "SCORE_PCT", value: 40 } });
-    }
-  }
+  // ---------- школа, программы, год, политика, коды (общая база) ----------
+  const { school, myp, dp, year, periods, formative, summative, codes } = await createSchoolBase(db, {
+    name: I("Лицей «Демо»", "Demo Lyceum", "«Демо» лицейі"), code: "DEMO",
+  });
   // T1 MYP и DP закрыт и заблокирован
   await db.gradingPeriod.updateMany({ where: { abbreviation: "T1" }, data: { locked: true } });
-
-  // ---------- коды посещаемости ----------
-  const codes = {
-    P: await db.attendanceCode.create({ data: { schoolId: school.id, code: "P", name: I("Присутствует", "Present", "Қатысады"), kind: "PRESENT", countsAsPresent: true, color: "#16a34a" } }),
-    A: await db.attendanceCode.create({ data: { schoolId: school.id, code: "A", name: I("Отсутствует", "Absent", "Қатыспады"), kind: "ABSENT", color: "#dc2626" } }),
-    L: await db.attendanceCode.create({ data: { schoolId: school.id, code: "L", name: I("Опоздание", "Late", "Кешікті"), kind: "LATE", countsAsPresent: true, color: "#d97706" } }),
-    E: await db.attendanceCode.create({ data: { schoolId: school.id, code: "E", name: I("Уважительная", "Excused", "Себепті"), kind: "EXCUSED", color: "#2563eb" } }),
-    O: await db.attendanceCode.create({ data: { schoolId: school.id, code: "O", name: I("Олимпиада", "Olympiad", "Олимпиада"), kind: "OLYMPIAD", countsAsPresent: true, color: "#7c3aed" } }),
-  };
-  await db.attendanceTier.createMany({
-    data: [
-      { schoolId: school.id, name: "Excellent", minPct: 95, maxPct: 100, color: "#16a34a" },
-      { schoolId: school.id, name: "Good", minPct: 90, maxPct: 94.99, color: "#65a30d" },
-      { schoolId: school.id, name: "At risk", minPct: 0, maxPct: 89.99, color: "#dc2626" },
-    ],
-  });
 
   // ---------- пользователи-сотрудники ----------
   let uidCounter = 1;
@@ -150,62 +77,10 @@ async function main() {
     phys: await mkStaff("Виктор", "Соколов", "physics@demo.school", "Учитель физики (DP)", [{ role: "TEACHER" }]),
   };
 
-  // ---------- предметные группы, предметы, критерии ----------
-  const sg = async (code: string, ru: string, en: string, kk: string, sortOrder: number) =>
-    db.subjectGroup.create({ data: { schoolId: school.id, code, name: I(ru, en, kk), sortOrder } });
-  const G = {
-    LL: await sg("LANG_LIT", "Язык и литература", "Language and literature", "Тіл және әдебиет", 1),
-    LA: await sg("LANG_ACQ", "Изучение языка", "Language acquisition", "Тілді меңгеру", 2),
-    IS: await sg("INDIV_SOC", "Индивидуумы и общества", "Individuals and societies", "Жеке тұлға және қоғам", 3),
-    SC: await sg("SCIENCES", "Естественные науки", "Sciences", "Жаратылыстану ғылымдары", 4),
-    MA: await sg("MATH", "Математика", "Mathematics", "Математика", 5),
-    DE: await sg("DESIGN", "Дизайн", "Design", "Дизайн", 6),
-  };
-  type Crit = [string, string, string, string]; // code, ru, en, kk
-  const mypSubjects: { key: keyof typeof T; group: { id: string }; name: [string, string, string]; criteria: Crit[]; hours: number }[] = [
-    { key: "math", group: G.MA, name: ["Математика", "Mathematics", "Математика"], hours: 5, criteria: [["A", "Знание и понимание", "Knowing and understanding", "Білу және түсіну"], ["B", "Исследование закономерностей", "Investigating patterns", "Заңдылықтарды зерттеу"], ["C", "Коммуникация", "Communicating", "Коммуникация"], ["D", "Применение математики в реальных ситуациях", "Applying mathematics in real-life contexts", "Математиканы өмірлік жағдайларда қолдану"]] },
-    { key: "sci", group: G.SC, name: ["Естественные науки", "Sciences", "Жаратылыстану"], hours: 4, criteria: [["A", "Знание и понимание", "Knowing and understanding", "Білу және түсіну"], ["B", "Исследование и планирование", "Inquiring and designing", "Зерттеу және жоспарлау"], ["C", "Обработка и оценка", "Processing and evaluating", "Өңдеу және бағалау"], ["D", "Влияние науки", "Reflecting on the impacts of science", "Ғылымның әсері туралы ой толғау"]] },
-    { key: "lit", group: G.LL, name: ["Русский язык и литература", "Russian language and literature", "Орыс тілі мен әдебиеті"], hours: 4, criteria: [["A", "Анализ", "Analysing", "Талдау"], ["B", "Организация", "Organizing", "Ұйымдастыру"], ["C", "Создание текста", "Producing text", "Мәтін құру"], ["D", "Использование языка", "Using language", "Тілді қолдану"]] },
-    { key: "eng", group: G.LA, name: ["Английский язык", "English language acquisition", "Ағылшын тілі"], hours: 4, criteria: [["A", "Аудирование", "Listening", "Тыңдалым"], ["B", "Чтение", "Reading", "Оқылым"], ["C", "Говорение", "Speaking", "Айтылым"], ["D", "Письмо", "Writing", "Жазылым"]] },
-    { key: "ind", group: G.IS, name: ["Индивидуумы и общества", "Individuals and societies", "Жеке тұлға және қоғам"], hours: 3, criteria: [["A", "Знание и понимание", "Knowing and understanding", "Білу және түсіну"], ["B", "Исследование", "Investigating", "Зерттеу"], ["C", "Коммуникация", "Communicating", "Коммуникация"], ["D", "Критическое мышление", "Thinking critically", "Сыни ойлау"]] },
-    { key: "des", group: G.DE, name: ["Дизайн", "Design", "Дизайн"], hours: 2, criteria: [["A", "Исследование и анализ", "Inquiring and analysing", "Зерттеу және талдау"], ["B", "Разработка идей", "Developing ideas", "Идеяларды әзірлеу"], ["C", "Создание решения", "Creating the solution", "Шешім жасау"], ["D", "Оценка", "Evaluating", "Бағалау"]] },
-    { key: "kaz", group: G.LA, name: ["Казахский язык", "Kazakh language", "Қазақ тілі"], hours: 3, criteria: [["A", "Аудирование", "Listening", "Тыңдалым"], ["B", "Чтение", "Reading", "Оқылым"], ["C", "Говорение", "Speaking", "Айтылым"], ["D", "Письмо", "Writing", "Жазылым"]] },
-  ];
-  const subjectIds: Record<string, string> = {};
-  const criteriaBySubject: Record<string, { id: string; code: string }[]> = {};
-  for (const s of mypSubjects) {
-    const subj = await db.subject.create({ data: { programmeId: myp.id, subjectGroupId: s.group.id, name: I(s.name[0], s.name[1], s.name[2]) } });
-    subjectIds[s.key] = subj.id;
-    criteriaBySubject[subj.id] = [];
-    for (const [code, ru, en, kk] of s.criteria) {
-      const c = await db.criterion.create({
-        data: {
-          subjectId: subj.id, code, name: I(ru, en, kk), maxLevel: 8,
-          descriptors: {
-            create: [
-              { levelFrom: 0, levelTo: 0, text: I("Не достигает ни одного дескриптора", "Does not reach a standard described", "Ешбір дескрипторға жетпейді") },
-              { levelFrom: 1, levelTo: 2, text: I("Ограниченный уровень", "Limited", "Шектеулі деңгей") },
-              { levelFrom: 3, levelTo: 4, text: I("Достаточный уровень", "Adequate", "Жеткілікті деңгей") },
-              { levelFrom: 5, levelTo: 6, text: I("Существенный уровень", "Substantial", "Елеулі деңгей") },
-              { levelFrom: 7, levelTo: 8, text: I("Отличный уровень", "Excellent", "Өте жақсы деңгей") },
-            ],
-          },
-        },
-      });
-      criteriaBySubject[subj.id].push({ id: c.id, code });
-    }
-  }
-  const dpSubjects = [
-    { key: "dpmath", teacher: T.math, group: G.MA, name: ["Математика: анализ и подходы", "Mathematics: analysis and approaches", "Математика: талдау және тәсілдер"], level: "SL" as const, hours: 4 },
-    { key: "dpphys", teacher: T.phys, group: G.SC, name: ["Физика", "Physics", "Физика"], level: "HL" as const, hours: 5 },
-    { key: "dpeng", teacher: T.eng, group: G.LA, name: ["Английский B", "English B", "Ағылшын B"], level: "HL" as const, hours: 4 },
-    { key: "dplit", teacher: T.lit, group: G.LL, name: ["Русский A: литература", "Russian A: literature", "Орыс A: әдебиет"], level: "SL" as const, hours: 3 },
-  ];
-  for (const s of dpSubjects) {
-    const subj = await db.subject.create({ data: { programmeId: dp.id, subjectGroupId: s.group.id, name: I(s.name[0], s.name[1], s.name[2]), firstAssessment: 2021 } });
-    subjectIds[s.key] = subj.id;
-    criteriaBySubject[subj.id] = [];
-  }
+  // ---------- предметные группы, предметы, критерии (общий каталог) ----------
+  const { subjectIds, criteriaBySubject } = await createSubjectCatalog(db, school.id, myp.id, dp.id);
+  const mypSubjects = MYP_SUBJECTS.map((s) => ({ ...s, key: s.key as keyof typeof T }));
+  const dpSubjects = DP_SUBJECTS.map((s) => ({ ...s, teacher: T[s.demoTeacher as keyof typeof T] }));
 
   // ---------- параллели, классы, ученики, родители ----------
   const classes: { name: string; grade: number; prog: typeof myp; size: number; advisor: { staff: { id: string } } }[] = [

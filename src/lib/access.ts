@@ -45,19 +45,29 @@ export async function canEditGrades(u: CurrentUser, courseId: string, periodId: 
   return !p?.locked;
 }
 
-/** Может ли видеть данные конкретного ученика. Родитель — только своих подтверждённых детей. */
+/** Может ли видеть данные конкретного ученика. Родитель — только своих подтверждённых детей. Один запрос к БД вместо цикла. */
 export async function canViewStudent(u: CurrentUser, studentId: string) {
   if (u.studentProfile?.id === studentId) return true;
   if (guardianChildIds(u).includes(studentId)) return true;
   if (isSchoolAdmin(u)) return true;
-  const enrollments = await db.courseEnrollment.findMany({ where: { studentId }, select: { course: { select: { id: true, programmeId: true } } } });
-  for (const e of enrollments) {
-    if (isProgrammeStaff(u, e.course.programmeId)) return true;
-    if (await teachesCourse(u, e.course.id)) return true;
-  }
-  if (u.staffProfile) {
-    const adv = await db.studentAdvisor.findFirst({ where: { studentId, staffId: u.staffProfile.id } });
-    if (adv) return true;
-  }
-  return false;
+  if (!u.staffProfile) return false;
+  const programmeIds = u.roles
+    .filter((r) => r.role === "COORDINATOR" || r.role === "DEPUTY_HEAD")
+    .map((r) => r.programmeId);
+  const allProgrammes = u.roles.some((r) => r.role === "DEPUTY_HEAD" && r.programmeId === null);
+  const staffId = u.staffProfile.id;
+  const hit = await db.studentProfile.findFirst({
+    where: {
+      id: studentId,
+      user: { schoolId: u.schoolId },
+      OR: [
+        { advisors: { some: { staffId } } },
+        { enrollments: { some: { course: { staff: { some: { staffId } } } } } },
+        ...(allProgrammes ? [{ enrollments: { some: {} } }] : []),
+        ...(programmeIds.filter(Boolean).length ? [{ enrollments: { some: { course: { programmeId: { in: programmeIds.filter(Boolean) as string[] } } } } }] : []),
+      ],
+    },
+    select: { id: true },
+  });
+  return !!hit;
 }
