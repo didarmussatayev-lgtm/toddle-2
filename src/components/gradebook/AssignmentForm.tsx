@@ -3,7 +3,7 @@
  * Форма задания: создание и редактирование. Ошибки показываются в самой форме, введённые значения сохраняются.
  */
 import Link from "next/link";
-import { useActionState, useState } from "react";
+import { startTransition, useActionState, useState } from "react";
 import { saveAssignment, type AssignmentFormState } from "@/app/actions/assignments";
 import type { Loc } from "@/lib/i18n-dict";
 import { useT } from "./shared";
@@ -27,10 +27,20 @@ export function AssignmentForm({ locale, courseId, assignmentId, initial, period
   const set = <K extends keyof Values>(k: K, value: Values[K]) => setV((prev) => ({ ...prev, [k]: value }));
   const toggleCriterion = (id: string) => set("criteria", v.criteria.includes(id) ? v.criteria.filter((x) => x !== id) : [...v.criteria, id]);
 
+  // Отправляем значения из состояния формы, а не через <form action>: иначе React после ответа сервера
+  // сбрасывает поля к исходным значениям, и при ошибке флажки и списки расходятся с тем, что выбрал учитель.
+  const submit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const fd = new FormData();
+    fd.set("courseId", courseId);
+    if (assignmentId) fd.set("assignmentId", assignmentId);
+    for (const k of ["title", "type", "due", "periodId", "maxScore", "instructions"] as const) fd.set(k, v[k]);
+    for (const id of v.criteria) fd.append("criteria", id);
+    startTransition(() => action(fd));
+  };
+
   return (
-    <form action={action} className="space-y-4">
-      <input type="hidden" name="courseId" value={courseId} />
-      {assignmentId && <input type="hidden" name="assignmentId" value={assignmentId} />}
+    <form onSubmit={submit} className="space-y-4">
       {state.error && (
         <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
           ⚠ {t(state.error)}{state.errorValue != null ? ` ${state.errorValue}` : ""}

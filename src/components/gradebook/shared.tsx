@@ -3,7 +3,7 @@
  * Общие части журнала в браузере: поле оценки с клавиатурной навигацией, автосохранение ячеек,
  * индикатор сохранения, выпадающее меню и обновление устаревших данных.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { saveCell } from "@/app/actions/grading";
@@ -15,6 +15,8 @@ export const useT = (locale: Loc): T => useMemo(() => (k: DictKey) => translate(
 
 export const isMissed = (s: string | null | undefined): s is "MISSED_VALID" | "MISSED_INVALID" => s === "MISSED_VALID" || s === "MISSED_INVALID";
 export const cellHasData = (c: Cell) => c.score != null || Object.values(c.levels).some((l) => l != null);
+/** Ввод оценки означает, что работа сдана: снимается пропуск и статус «не сдано» (то же правило, что на сервере). */
+export const markSubmitted = (c: Cell): Cell => (c.sub === "NOT_SUBMITTED" || isMissed(c.sub) ? { ...c, sub: "SUBMITTED", makeupUntil: null } : c);
 
 const ERR_KEY: Record<SaveError, DictKey> = { forbidden: "errForbidden", notFound: "errNotFound", range: "errRange", invalid: "errInvalid" };
 
@@ -205,12 +207,27 @@ type GradeInputProps = {
 
 /**
  * Поле ввода оценки. Черновик хранится в самом поле; в журнал значение уходит по Enter, стрелке или уходу из ячейки.
- * Enter / ↓ — вниз, Shift+Enter / ↑ — вверх, ← → — в соседнюю ячейку, Esc — отменить ввод.
+ * Ведёт себя как ячейка электронной таблицы:
+ * - щелчок или переход в ячейку выделяет значение целиком — новый ввод заменяет старый;
+ * - Enter / ↓ — вниз, Shift+Enter / ↑ — вверх, ← → — в соседнюю ячейку, Esc — отменить ввод;
+ * - повторный щелчок по уже выбранной ячейке или F2 включает правку внутри значения: тогда ← → двигают курсор.
  */
 export function GradeInput({ value, r, c, disabled, ariaLabel, className = "", inputMode = "decimal", onCommit, onFocus }: GradeInputProps) {
   const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const shown = draft ?? value;
+  const input = useRef<HTMLInputElement>(null);
+  /** правка внутри значения (F2 или повторный щелчок): стрелки влево/вправо двигают курсор, а не переводят в соседнюю ячейку */
+  const caretMode = useRef(false);
+  /** текущее нажатие мыши выбрало ячейку (а не пришлось по уже выбранной) */
+  const pressSelects = useRef(false);
+  // после отмены ввода (Esc) выделяем прежнее значение сразу после перерисовки, до следующего нажатия клавиши
+  const reselect = useRef(false);
+  useLayoutEffect(() => {
+    if (!reselect.current) return;
+    reselect.current = false;
+    input.current?.select();
+  });
 
   const commit = (): boolean => {
     if (draft == null) return true;
@@ -239,21 +256,27 @@ export function GradeInput({ value, r, c, disabled, ariaLabel, className = "", i
     else if (e.key === "ArrowDown") move(1, 0);
     else if (e.key === "ArrowUp") move(-1, 0);
     else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-      // внутри набранного текста стрелки двигают курсор; из края поля — переводят в соседнюю ячейку
-      const all = el.selectionStart === 0 && el.selectionEnd === el.value.length;
-      const atEdge = e.key === "ArrowLeft" ? el.selectionStart === 0 && el.selectionEnd === 0 : el.selectionStart === el.value.length;
-      if (all || atEdge) move(0, e.key === "ArrowLeft" ? -1 : 1);
+      // при правке внутри значения стрелки двигают курсор и переводят в соседнюю ячейку только с края поля
+      const atEdge = e.key === "ArrowLeft" ? el.selectionStart === 0 && el.selectionEnd === 0 : el.selectionStart === el.value.length && el.selectionEnd === el.value.length;
+      if (!caretMode.current || atEdge) move(0, e.key === "ArrowLeft" ? -1 : 1);
+    } else if (e.key === "F2") {
+      e.preventDefault();
+      caretMode.current = true;
+      el.setSelectionRange(el.value.length, el.value.length);
     } else if (e.key === "Escape") {
       e.preventDefault();
+      caretMode.current = false;
+      if (draft == null && error == null) return el.select();
+      reselect.current = true;
       setDraft(null);
       setError(null);
-      requestAnimationFrame(() => el.select());
     }
   };
 
   return (
     <span className="relative block">
       <input
+        ref={input}
         type="text"
         inputMode={inputMode}
         autoComplete="off"
@@ -265,8 +288,26 @@ export function GradeInput({ value, r, c, disabled, ariaLabel, className = "", i
         aria-invalid={error ? true : undefined}
         value={shown}
         onChange={(e) => { setDraft(e.target.value); if (error) setError(null); }}
-        onFocus={(e) => { e.currentTarget.select(); onFocus?.(); }}
-        onBlur={() => { commit(); }}
+        onMouseDown={(e) => {
+          const el = e.currentTarget;
+          pressSelects.current = document.activeElement !== el && !el.disabled;
+          if (pressSelects.current) {
+            // первый щелчок выбирает ячейку целиком (иначе браузер поставил бы курсор в место щелчка)
+            e.preventDefault();
+            el.focus();
+          } else caretMode.current = true; // повторный щелчок — правка внутри значения
+        }}
+        // Браузер при отпускании кнопки сворачивает выделение в курсор, если щелчок пришёлся по выделенному тексту.
+        // Отменяем это для щелчка, выбравшего ячейку, и на всякий случай выделяем значение ещё раз.
+        onMouseUp={(e) => { if (pressSelects.current) e.preventDefault(); }}
+        onClick={(e) => {
+          if (!pressSelects.current) return;
+          pressSelects.current = false;
+          const el = e.currentTarget;
+          if (document.activeElement === el && draft == null) el.select();
+        }}
+        onFocus={(e) => { caretMode.current = false; e.currentTarget.select(); onFocus?.(); }}
+        onBlur={() => { caretMode.current = false; commit(); }}
         onKeyDown={onKeyDown}
         className={`gb-input ${error ? "gb-input-error" : ""} ${className}`}
       />

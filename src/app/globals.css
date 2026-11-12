@@ -81,4 +81,11 @@ body { @apply bg-slate-50 text-slate-900 antialiased; }
   .ag .gb-input { @apply mx-auto h-8 rounded-lg border border-slate-300 bg-white; width: 3.5rem; min-width: 0; }
   .ag .gb-input:disabled { @apply bg-slate-50; }
   .gb-panel { @apply fixed inset-x-2 bottom-2 z-40 rounded-xl border border-slate-200 bg-white shadow-xl sm:inset-x-auto sm:bottom-4 sm:right-4 sm:w-80; }
+  /* телефон: закреплённая колонка с фамилиями уже, чтобы оценки были видны без прокрутки */
+  @media (max-width: 639px) {
+    .gb th.gb-student-head { width: 8.5rem; min-width: 0; }
+    .gb td.gb-student { max-width: 8.5rem; }
+    .gb td.gb-student .gb-num { display: none; }
+    .gb th.gb-assign { width: 9rem; }
+  }
 }

@@ -95,7 +95,8 @@ export async function saveAssignment(_prev: AssignmentFormState, formData: FormD
     db.auditLog.create({
       data: {
         schoolId: course.schoolId, actorId: user.id, action: "ASSIGNMENT_UPDATE", entityType: "Assignment", entityId: existing.id,
-        meta: { course: course.name, title: values.title, type, period: period.abbreviation, maxScore, from: { title: existing.title, type: existing.type, maxScore: existing.maxScore == null ? null : Number(existing.maxScore) } },
+        // плоские значения: страница аудита показывает метаданные строкой «ключ: значение»
+        meta: { course: course.name, title: values.title, type, period: period.abbreviation, maxScore, was: `${existing.title} · ${existing.type} · ${existing.maxScore == null ? "—" : Number(existing.maxScore)}` },
       },
     }),
   ]);

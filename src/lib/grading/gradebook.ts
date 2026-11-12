@@ -139,7 +139,7 @@ async function rowTotalsFor(courseId: string, periodId: string | null, studentId
  * Сохранить изменение одной ячейки журнала и пересчитать итоги ученика.
  * Правила:
  * - пропуск (уважительный или нет) стирает балл и уровни: работа либо не учитывается (EX), либо даёт 0 (0*);
- * - ввод оценки в ячейку с пропуском снимает пропуск (работа сдана/пересдана);
+ * - ввод оценки отмечает работу сданной: снимает пропуск (пересдача) и статус «не сдано»;
  * - опубликованная оценка после правки остаётся опубликованной; новая — видна только учителю до публикации;
  * - значения проверяются по максимуму задания (балл) и критерия (уровень).
  */
@@ -175,8 +175,8 @@ export async function applyCellPatch(user: CurrentUser, assignmentId: string, st
       tx.submission.findUnique({ where: key }),
     ]);
     const setsValue = score != null || Object.values(levelPatch).some((l) => l != null);
-    // ввод оценки снимает пропуск: работа сдана или пересдана
-    const nextSub: SubStatus | undefined = patch.sub ?? (setsValue && isMissed(sub?.status) ? "SUBMITTED" : undefined);
+    // ввод оценки означает, что работа сдана: снимает пропуск (пересдача) и отметку «не сдано»
+    const nextSub: SubStatus | undefined = patch.sub ?? (setsValue && (!sub || sub.status === "NOT_SUBMITTED" || isMissed(sub.status)) ? "SUBMITTED" : undefined);
     const missed = isMissed(nextSub ?? sub?.status);
 
     // ---- новые значения оценки ----

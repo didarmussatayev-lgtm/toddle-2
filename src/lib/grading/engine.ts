@@ -86,6 +86,8 @@ export function categoryAverages(
 /**
  * Взвешенный процент по категориям (Formative 25 / Summative 75).
  * Внутри категории — среднее процентов работ. Пустые категории исключаются, веса перенормируются.
+ * Итог считается от процентов категорий, округлённых до сотых, — так же, как в Toddle, и так, как видит
+ * учитель в журнале: 25 % × 32,85 + 75 % × 31,67 = 31,97 (а не 31,96 от неокруглённых значений).
  */
 export function weightedCategoryPercent(
   items: { category: string; pct: number }[],
@@ -95,7 +97,7 @@ export function weightedCategoryPercent(
   let sumW = 0;
   let acc = 0;
   for (const [cat, mean] of Object.entries(avg)) {
-    acc += weights[cat] * mean;
+    acc += weights[cat] * roundHalfUp(mean, 2);
     sumW += weights[cat];
   }
   return sumW === 0 ? null : roundHalfUp(acc / sumW, 2);

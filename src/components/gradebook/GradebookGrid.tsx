@@ -12,7 +12,7 @@ import { fmtDate } from "@/lib/dates";
 import { fmtPct, fmtScore, MISSED_LABEL, parseGradeInput, type ParsedInput } from "@/lib/grading/input";
 import { EMPTY_CELL, EMPTY_TOTALS, type Cell, type CellPatch, type GbColumn, type GbStudent, type RowTotals, type SubStatus } from "@/lib/grading/types";
 import type { Loc } from "@/lib/i18n-dict";
-import { bumpSaveRev, cellHasData, ErrorBanner, GradeInput, isMissed, Menu, menuItemClass, SaveIndicator, useCellSaver, useStaleRefresh, useT, type T } from "./shared";
+import { bumpSaveRev, cellHasData, ErrorBanner, GradeInput, isMissed, markSubmitted, Menu, menuItemClass, SaveIndicator, useCellSaver, useStaleRefresh, useT, type T } from "./shared";
 
 type Category = { code: string; name: string; weight: number };
 type SubjectCriterion = { id: string; code: string; name: string };
@@ -147,8 +147,7 @@ export function GradebookGrid(props: GradebookGridProps) {
       next = { ...cur, sub: "NOT_SUBMITTED", makeupUntil: null };
     } else {
       const value = parsed.kind === "value" ? parsed.value : null;
-      // ввод оценки в ячейку с пропуском снимает пропуск (работа сдана или пересдана)
-      const base: Cell = isMissed(cur.sub) ? { ...cur, sub: "SUBMITTED", makeupUntil: null } : cur;
+      const base: Cell = value != null ? markSubmitted(cur) : cur;
       if (sub.kind === "level") {
         patch = { levels: { [sub.id]: value } };
         next = { ...base, levels: { ...base.levels, [sub.id]: value } };
@@ -467,7 +466,7 @@ const Row = memo(function Row({ r, student, layout, cells, totals, busy, canEdit
   return (
     <tr>
       <td className="gb-sticky gb-student">
-        <span className="mr-2 inline-block w-5 text-right text-xs tabular-nums text-slate-400">{r + 1}</span>
+        <span className="gb-num mr-2 inline-block w-5 text-right text-xs tabular-nums text-slate-400">{r + 1}</span>
         <Link href={`/students/${student.id}`} className="font-medium hover:underline">{student.name}</Link>
       </td>
       {totalCols.map((tc) => (

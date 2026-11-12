@@ -10,7 +10,7 @@ import { setAssignmentPublished } from "@/app/actions/grading";
 import { fmtPct, fmtScore, MISSED_LABEL, parseGradeInput } from "@/lib/grading/input";
 import { EMPTY_CELL, type Cell, type CellPatch, type GbColumn, type GbStudent, type SubStatus } from "@/lib/grading/types";
 import type { Loc } from "@/lib/i18n-dict";
-import { bumpSaveRev, cellHasData, ErrorBanner, focusGridCell, GradeInput, isMissed, SaveIndicator, useCellSaver, useStaleRefresh, useT } from "./shared";
+import { bumpSaveRev, cellHasData, ErrorBanner, focusGridCell, GradeInput, isMissed, markSubmitted, SaveIndicator, useCellSaver, useStaleRefresh, useT } from "./shared";
 
 const STATUSES: SubStatus[] = ["SUBMITTED", "LATE", "NOT_SUBMITTED", "MISSED_VALID", "MISSED_INVALID"];
 const levelTone = (v: number) => (v >= 7 ? "text-emerald-700" : v >= 5 ? "text-green-700" : v >= 3 ? "text-amber-700" : "text-red-700");
@@ -67,9 +67,9 @@ export function AssignmentGrid(props: { version: number; locale: Loc; canEdit: b
       edit(studentId, { sub: "NOT_SUBMITTED" }, (c) => ({ ...c, sub: "NOT_SUBMITTED", makeupUntil: null }));
     } else {
       const value = parsed.kind === "value" ? parsed.value : null;
-      const unmiss = (c: Cell): Cell => (isMissed(c.sub) ? { ...c, sub: "SUBMITTED", makeupUntil: null } : c);
-      if (level) edit(studentId, { levels: { [target.criterionId]: value } }, (c) => ({ ...unmiss(c), levels: { ...c.levels, [target.criterionId]: value } }));
-      else edit(studentId, { score: value }, (c) => ({ ...unmiss(c), score: value }));
+      const base = (c: Cell): Cell => (value != null ? markSubmitted(c) : c);
+      if (level) edit(studentId, { levels: { [target.criterionId]: value } }, (c) => ({ ...base(c), levels: { ...c.levels, [target.criterionId]: value } }));
+      else edit(studentId, { score: value }, (c) => ({ ...base(c), score: value }));
     }
     return null;
   };
@@ -138,10 +138,10 @@ export function AssignmentGrid(props: { version: number; locale: Loc; canEdit: b
             <tr>
               <th className="w-8 text-right">№</th>
               <th>{t("student")}</th>
-              <th>{t("submissionStatus")}</th>
               {a.criteria.map((c) => <th key={c.id} className="text-center" title={`${c.code}. ${c.name}`}>{c.code} <span className="font-normal text-slate-400">0–{c.maxLevel}</span></th>)}
               {a.maxScore != null && <th className="text-center">{t("score")} <span className="font-normal text-slate-400">/{fmtScore(a.maxScore)}</span></th>}
               {a.maxScore != null && <th className="text-right">%</th>}
+              <th>{t("submissionStatus")}</th>
               <th className="w-full min-w-[14rem]">{t("comment")}</th>
               <th></th>
             </tr>
@@ -156,13 +156,6 @@ export function AssignmentGrid(props: { version: number; locale: Loc; canEdit: b
                 <tr key={s.id}>
                   <td className="text-right text-xs tabular-nums text-slate-400">{r + 1}</td>
                   <td className="whitespace-nowrap font-medium"><Link href={`/students/${s.id}`} className="hover:underline">{s.name}</Link></td>
-                  <td>
-                    <select value={cell.sub === "RETURNED" ? "SUBMITTED" : cell.sub} disabled={!canEdit} aria-label={`${s.name} — ${t("submissionStatus")}`}
-                      onChange={(e) => { setStatus(s.id, e.target.value as SubStatus); }}
-                      className={`input py-1 text-xs ${missed === "MISSED_VALID" ? "border-blue-300 text-blue-800" : missed === "MISSED_INVALID" ? "border-red-300 text-red-800" : ""}`}>
-                      {STATUSES.map((st) => <option key={st} value={st}>{t(`sub_${st}`)}</option>)}
-                    </select>
-                  </td>
                   {a.criteria.map((c, i) => {
                     const v = cell.levels[c.id] ?? null;
                     return (
@@ -184,6 +177,13 @@ export function AssignmentGrid(props: { version: number; locale: Loc; canEdit: b
                       {missed === "MISSED_INVALID" ? "0%" : cell.score != null && !missed ? `${Math.round((cell.score / a.maxScore) * 100)}%` : <span className="text-slate-300">—</span>}
                     </td>
                   )}
+                  <td>
+                    <select value={cell.sub === "RETURNED" ? "SUBMITTED" : cell.sub} disabled={!canEdit} aria-label={`${s.name} — ${t("submissionStatus")}`}
+                      onChange={(e) => { setStatus(s.id, e.target.value as SubStatus); }}
+                      className={`input py-1 text-xs ${missed === "MISSED_VALID" ? "border-blue-300 text-blue-800" : missed === "MISSED_INVALID" ? "border-red-300 text-red-800" : ""}`}>
+                      {STATUSES.map((st) => <option key={st} value={st}>{t(`sub_${st}`)}</option>)}
+                    </select>
+                  </td>
                   <td>
                     <CommentInput key={cell.comment} initial={cell.comment} r={r} c={commentCol} disabled={!canEdit} ariaLabel={`${s.name} — ${t("comment")}`} placeholder={t("commentPlaceholder")}
                       onSave={(text) => edit(s.id, { comment: text }, (c) => ({ ...c, comment: text }))} />
