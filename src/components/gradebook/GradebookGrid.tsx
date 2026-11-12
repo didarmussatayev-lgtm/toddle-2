@@ -510,17 +510,22 @@ const Row = memo(function Row({ r, student, layout, cells, totals, busy, canEdit
               title={cell?.comment ? cell.comment : draft && i === 0 ? `${t("ev_EVALUATED")}, ${t("notPublished").toLowerCase()}` : undefined}>
               {i === 0 && draft && mixedCols.has(col.id) && <span className="gb-dot-draft" aria-hidden />}
               {i === subs.length - 1 && cell?.comment && <span className="gb-note" aria-hidden />}
-              <GradeInput
-                value={shown} r={r} c={offset + i} disabled={!canEdit} ariaLabel={label} className={tone}
-                inputMode={sub.kind === "level" ? "numeric" : "decimal"}
-                onFocus={() => onFocusCell(student.id, col.id)}
-                onCommit={(raw) => {
-                  const parsed = parseGradeInput(raw, sub.max, sub.kind === "level");
-                  if (parsed.kind === "error") return parsed.code === "range" ? `${t("errRange")} ${fmtScore(sub.max)}` : parsed.code === "integer" ? t("errInteger") : t("errFormat");
-                  onEdit(student.id, col, sub, parsed);
-                  return null;
-                }}
-              />
+              {canEdit ? (
+                <GradeInput
+                  value={shown} r={r} c={offset + i} ariaLabel={label} className={tone}
+                  inputMode={sub.kind === "level" ? "numeric" : "decimal"}
+                  onFocus={() => onFocusCell(student.id, col.id)}
+                  onCommit={(raw) => {
+                    const parsed = parseGradeInput(raw, sub.max, sub.kind === "level");
+                    if (parsed.kind === "error") return parsed.code === "range" ? `${t("errRange")} ${fmtScore(sub.max)}` : parsed.code === "integer" ? t("errInteger") : t("errFormat");
+                    onEdit(student.id, col, sub, parsed);
+                    return null;
+                  }}
+                />
+              ) : (
+                // только просмотр (период заблокирован или нет права оценивать): ячейку можно выбрать, чтобы увидеть статус и комментарий
+                <button type="button" className={`gb-input gb-readonly ${tone}`} aria-label={`${label}: ${shown || "—"}`} onFocus={() => onFocusCell(student.id, col.id)}>{shown || "\u00a0"}</button>
+              )}
             </td>
           );
         });
